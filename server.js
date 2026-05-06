@@ -23,6 +23,7 @@ app.use(express.json({ limit: "80mb" }));
 const client = new vision.ImageAnnotatorClient();
 const FIREBASE_WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY;
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "spx-motorista-parceiro";
+const MASTER_ADMIN_PHONES = new Set(["21978818116", "5521978818116"]);
 
 function normalizePhoneBR(raw = "") {
   const digits = String(raw).replace(/\D/g, "");
@@ -39,14 +40,66 @@ function normalizePhoneDigits(raw = "") {
   return String(raw).replace(/\D/g, "");
 }
 
+function isMasterPhone(raw = "") {
+  return MASTER_ADMIN_PHONES.has(normalizePhoneDigits(raw));
+}
+
+function resolveRole(userData = {}, uid = "") {
+  if (isMasterPhone(uid) || isMasterPhone(userData.phone || "")) return "master";
+  if (userData.role === "admin2") return "admin2";
+  return "user";
+}
+
 function resolveCanUploadPhotos(userData = {}) {
   if (userData.canUploadPhotos === true) return true;
-  if (userData.role === "master" || userData.role === "admin2") return true;
+  if (resolveRole(userData, userData.uid || userData.phone || "") === "master") return true;
+  if (userData.role === "admin2") return true;
   return false;
 }
 
 function resolveEditMode(userData = {}) {
   return userData.editMode === true;
+}
+
+function resolveEditScope(userData = {}) {
+  const scope = String(userData.editScope || "").trim().toLowerCase();
+  if (scope === "tela4" || scope === "all") {
+    return scope;
+  }
+  return resolveEditMode(userData) ? "all" : "none";
+}
+
+function resolveMustChangePassword(userData = {}) {
+  return userData.mustChangePassword === true;
+}
+
+function generateTemporaryPassword(length = 8) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let result = "";
+  for (let index = 0; index < length; index += 1) {
+    result += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return result;
+}
+
+async function writeAdminAudit(actorUid, action, targetUid, details = {}) {
+  try {
+    await db.collection("adminAudit").add({
+      actorUid: String(actorUid || "").trim() || "unknown",
+      action,
+      targetUid: String(targetUid || "").trim() || "unknown",
+      details,
+      createdAtIso: new Date().toISOString(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    console.log("[ADMIN_AUDIT] write_failed", {
+      actorUid,
+      action,
+      targetUid,
+      error: String((error && error.message) || error),
+    });
+  }
 }
 
 const PHOTO_KEYS = ["placa", "placa2", "tela6", "tela11"];
@@ -95,18 +148,30 @@ async function requireAdmin(req, res, next) {
     });
 
     const uid = req.user?.uid || "";
-    const phoneDigits = normalizePhoneDigits(uid);
-    if (phoneDigits === "21978818116" || phoneDigits === "5521978818116") {
+    if (isMasterPhone(uid)) {
+      req.adminAccess = "master";
       return next();
     }
 
-    if (req.user?.role === "master" || req.user?.role === "admin2" || req.user?.adminMaster === true) {
+    if (req.user?.role === "master" || req.user?.adminMaster === true) {
+      req.adminAccess = "master";
+      return next();
+    }
+
+    if (req.user?.role === "admin2") {
+      req.adminAccess = "admin2";
       return next();
     }
 
     const adminSnap = await db.collection("users").doc(uid).get();
     const adminData = adminSnap.exists ? adminSnap.data() || {} : {};
-    if (adminData.role === "master" || adminData.role === "admin2") {
+    if (resolveRole(adminData, uid) === "master") {
+      req.adminAccess = "master";
+      return next();
+    }
+
+    if (resolveRole(adminData, uid) === "admin2") {
+      req.adminAccess = "admin2";
       return next();
     }
 
@@ -114,6 +179,16 @@ async function requireAdmin(req, res, next) {
   } catch (error) {
     return res.status(401).json({ error: "Sessao invalida.", details: String(error.message || error) });
   }
+}
+
+function ensureCanManageTarget(req, res, targetUid, targetData = {}) {
+  const access = req.adminAccess || "admin2";
+  const targetRole = resolveRole(targetData, targetUid);
+  if (targetRole === "master" && access !== "master") {
+    res.status(404).json({ error: "Usuario nao encontrado." });
+    return false;
+  }
+  return true;
 }
 
 function parseDataUrl(dataUrl = "") {
@@ -206,6 +281,32 @@ async function downloadPhotoDataUrl(path, mimeType, storedBucketName) {
   return "";
 }
 
+async function deletePhotoFiles(fields = {}) {
+  for (const key of PHOTO_KEYS) {
+    const path = fields[`${key}Path`];
+    if (!path) continue;
+
+    const bucketNames = Array.from(
+      new Set([fields[`${key}Bucket`], ...getStorageBucketCandidates()].filter(Boolean))
+    );
+
+    for (const bucketName of bucketNames) {
+      try {
+        const bucket = admin.storage().bucket(bucketName);
+        const file = bucket.file(path);
+        const [exists] = await file.exists();
+        if (!exists) continue;
+        await file.delete();
+        break;
+      } catch (error) {
+        if (!isBucketMissingError(error)) {
+          throw error;
+        }
+      }
+    }
+  }
+}
+
 function buildPhotoStatus(fields = {}) {
   const hasPlaca = !!fields.placaPath;
   const hasTela6 = !!fields.tela6Path;
@@ -279,6 +380,8 @@ app.post("/auth/register", async (req, res) => {
       role,
       canUploadPhotos,
       editMode: false,
+      editScope: "none",
+      mustChangePassword: false,
       active: true,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -333,9 +436,10 @@ app.post("/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Senha incorreta." });
     }
 
-    const role = data.role === "admin2" ? "admin2" : data.role === "master" ? "master" : "user";
+    const role = resolveRole(data, uid);
     const canUploadPhotos = resolveCanUploadPhotos(data);
-    const editMode = resolveEditMode(data);
+    const editScope = resolveEditScope(data);
+    const editMode = editScope !== "none";
     const claims = role === "master" ? { role, adminMaster: true, canUploadPhotos } : { role, canUploadPhotos };
     const customToken = await admin.auth().createCustomToken(uid, claims);
     const tokenPayload = await exchangeCustomTokenForIdToken(customToken);
@@ -354,6 +458,8 @@ app.post("/auth/login", async (req, res) => {
       role,
       canUploadPhotos,
       editMode,
+      editScope,
+      mustChangePassword: resolveMustChangePassword(data),
       customToken,
       idToken: tokenPayload.idToken,
       refreshToken: tokenPayload.refreshToken,
@@ -373,12 +479,14 @@ app.get("/admin/users", requireAdmin, async (_req, res) => {
       return {
         uid: doc.id,
         phone: data.phone || doc.id,
-        role: data.role === "admin2" ? "admin2" : data.role === "master" ? "master" : "user",
+        role: resolveRole(data, doc.id),
         active: data.active !== false,
-        editMode: data.editMode === true,
+        editMode: resolveEditScope(data) !== "none",
+        editScope: resolveEditScope(data),
+        mustChangePassword: resolveMustChangePassword(data),
         canUploadPhotos: resolveCanUploadPhotos(data),
       };
-    });
+    }).filter((user) => (_req.adminAccess === "master" ? true : user.role !== "master"));
 
     return res.json({ ok: true, users });
   } catch (error) {
@@ -399,6 +507,13 @@ app.patch("/admin/users/:uid", requireAdmin, async (req, res) => {
     if (!snap.exists) {
       return res.status(404).json({ error: "Usuario nao encontrado." });
     }
+    if (!ensureCanManageTarget(req, res, uid, snap.data() || {})) {
+      return;
+    }
+    const currentData = snap.data() || {};
+    if (!ensureCanManageTarget(req, res, uid, currentData)) {
+      return;
+    }
 
     const updates = {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -410,25 +525,226 @@ app.patch("/admin/users/:uid", requireAdmin, async (req, res) => {
 
     if (typeof req.body?.editMode === "boolean") {
       updates.editMode = req.body.editMode;
+      updates.editScope = req.body.editMode ? "all" : "none";
+    }
+
+    if (typeof req.body?.editScope === "string") {
+      const editScope = resolveEditScope({ editScope: req.body.editScope });
+      updates.editScope = editScope;
+      updates.editMode = editScope !== "none";
     }
 
     await userRef.set(updates, { merge: true });
-    const merged = { ...(snap.data() || {}), ...req.body, ...updates };
+    const merged = { ...currentData, ...req.body, ...updates };
+    await writeAdminAudit(req.user?.uid, "update_user", uid, {
+      active: typeof req.body?.active === "boolean" ? req.body.active : undefined,
+      editScope: typeof req.body?.editScope === "string" ? resolveEditScope({ editScope: req.body.editScope }) : undefined,
+      editMode: typeof req.body?.editMode === "boolean" ? req.body.editMode : undefined,
+    });
 
     return res.json({
       ok: true,
       user: {
         uid,
         phone: merged.phone || uid,
-        role: merged.role === "admin2" ? "admin2" : merged.role === "master" ? "master" : "user",
+        role: resolveRole(merged, uid),
         active: merged.active !== false,
-        editMode: merged.editMode === true,
+        editMode: resolveEditScope(merged) !== "none",
+        editScope: resolveEditScope(merged),
+        mustChangePassword: resolveMustChangePassword(merged),
         canUploadPhotos: resolveCanUploadPhotos(merged),
       },
     });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: "Falha ao atualizar usuario", details: String(error.message || error) });
+  }
+});
+
+app.post("/admin/users/:uid/password", requireAdmin, async (req, res) => {
+  try {
+    const uid = String(req.params.uid || "").trim();
+    if (!uid) {
+      return res.status(400).json({ error: "Usuario invalido." });
+    }
+
+    const userRef = db.collection("users").doc(uid);
+    const snap = await userRef.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Usuario nao encontrado." });
+    }
+
+    const providedPassword = String(req.body?.newPassword || "").trim();
+    const generateTemporary = req.body?.generateTemporary === true;
+    const requestedForceChange = req.body?.forceChangeOnNextLogin === true;
+    const forceWithoutReset = req.body?.forceChangeOnly === true;
+
+    if (!generateTemporary && !forceWithoutReset && providedPassword.length < 4) {
+      return res.status(400).json({ error: "A nova senha deve ter pelo menos 4 caracteres." });
+    }
+
+    const nextPassword = generateTemporary ? generateTemporaryPassword(8) : providedPassword;
+    const updates = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (generateTemporary || providedPassword) {
+      updates.passwordHash = await bcrypt.hash(nextPassword, 10);
+    }
+
+    updates.mustChangePassword = forceWithoutReset ? true : requestedForceChange || generateTemporary;
+
+    await userRef.set(updates, { merge: true });
+    await writeAdminAudit(req.user?.uid, "update_password", uid, {
+      generatedTemporary: generateTemporary,
+      forcedChangeOnly: forceWithoutReset,
+      forceChangeOnNextLogin: updates.mustChangePassword === true,
+    });
+
+    return res.json({
+      ok: true,
+      uid,
+      temporaryPassword: generateTemporary ? nextPassword : "",
+      mustChangePassword: updates.mustChangePassword === true,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao atualizar senha do usuario",
+      details: String(error.message || error),
+    });
+  }
+});
+
+app.get("/admin/users/:uid/photos", requireAdmin, async (req, res) => {
+  try {
+    const uid = String(req.params.uid || "").trim();
+    if (!uid) {
+      return res.status(400).json({ error: "Usuario invalido." });
+    }
+
+    const userSnap = await db.collection("users").doc(uid).get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: "Usuario nao encontrado." });
+    }
+    if (!ensureCanManageTarget(req, res, uid, userSnap.data() || {})) {
+      return;
+    }
+
+    const snap = await db.collection("userPhotos").doc(uid).get();
+    if (!snap.exists) {
+      return res.json({
+        ok: true,
+        exists: false,
+        requiredComplete: false,
+        hasPlaca: false,
+        hasTela6: false,
+        hasTela11: false,
+        hasPlaca2: false,
+        updatedAtIso: "",
+        photos: {},
+      });
+    }
+
+    const data = snap.data() || {};
+    const photos = {};
+    for (const key of PHOTO_KEYS) {
+      photos[key] = await downloadPhotoDataUrl(
+        data[`${key}Path`],
+        data[`${key}MimeType`],
+        data[`${key}Bucket`]
+      );
+    }
+
+    return res.json({
+      ok: true,
+      exists: true,
+      ...buildPhotoStatus(data),
+      updatedAtIso: data.updatedAtIso || "",
+      photos,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao carregar fotos do usuario",
+      details: String(error.message || error),
+    });
+  }
+});
+
+app.get("/admin/audit", requireAdmin, async (_req, res) => {
+  try {
+    const snap = await db.collection("adminAudit").orderBy("createdAt", "desc").limit(50).get();
+    const items = snap.docs.map((doc) => {
+      const data = doc.data() || {};
+      return {
+        id: doc.id,
+        actorUid: data.actorUid || "",
+        action: data.action || "",
+        targetUid: data.targetUid || "",
+        details: data.details || {},
+        createdAtIso: data.createdAtIso || "",
+      };
+    }).filter((item) => (_req.adminAccess === "master" ? true : !isMasterPhone(item.targetUid) && !isMasterPhone(item.actorUid)));
+
+    return res.json({ ok: true, items });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao carregar historico administrativo",
+      details: String(error.message || error),
+    });
+  }
+});
+
+app.delete("/admin/users/:uid", requireAdmin, async (req, res) => {
+  try {
+    const uid = String(req.params.uid || "").trim();
+    if (!uid) {
+      return res.status(400).json({ error: "Usuario invalido." });
+    }
+
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: "Usuario nao encontrado." });
+    }
+    const currentData = userSnap.data() || {};
+    if (!ensureCanManageTarget(req, res, uid, currentData)) {
+      return;
+    }
+
+    const photoRef = db.collection("userPhotos").doc(uid);
+    const photoSnap = await photoRef.get();
+    const photoData = photoSnap.exists ? photoSnap.data() || {} : {};
+
+    if (photoSnap.exists) {
+      await deletePhotoFiles(photoData);
+      await photoRef.delete();
+    }
+
+    await userRef.delete();
+    await writeAdminAudit(req.user?.uid, "delete_user", uid, {
+      phone: currentData.phone || uid,
+      hadPhotos: photoSnap.exists,
+    });
+
+    try {
+      await admin.auth().deleteUser(uid);
+    } catch (error) {
+      console.log("[ADMIN] delete_auth_user_warning", {
+        uid,
+        error: String((error && error.message) || error),
+      });
+    }
+
+    return res.json({ ok: true, uid });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao excluir usuario",
+      details: String(error.message || error),
+    });
   }
 });
 
@@ -478,6 +794,79 @@ app.post("/photos/sync", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("[PHOTOS] sync_error", error);
     return res.status(500).json({ error: "Falha ao sincronizar fotos", details: String(error.message || error) });
+  }
+});
+
+app.post("/auth/change-password", requireAuth, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const newPassword = String(req.body?.newPassword || "").trim();
+    const currentPassword = String(req.body?.currentPassword || "").trim();
+
+    if (newPassword.length < 4) {
+      return res.status(400).json({ error: "A nova senha deve ter pelo menos 4 caracteres." });
+    }
+
+    const userRef = db.collection("users").doc(uid);
+    const snap = await userRef.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Usuario nao encontrado." });
+    }
+
+    const data = snap.data() || {};
+    const mustChangePassword = resolveMustChangePassword(data);
+
+    if (!mustChangePassword) {
+      const passwordOk = await bcrypt.compare(currentPassword, data.passwordHash || "");
+      if (!passwordOk) {
+        return res.status(403).json({ error: "Senha atual incorreta." });
+      }
+    }
+
+    await userRef.set(
+      {
+        passwordHash: await bcrypt.hash(newPassword, 10),
+        mustChangePassword: false,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return res.json({ ok: true, uid, mustChangePassword: false });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao trocar senha",
+      details: String(error.message || error),
+    });
+  }
+});
+
+app.post("/auth/complete-edit-mode", requireAuth, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const userRef = db.collection("users").doc(uid);
+    const snap = await userRef.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Usuario nao encontrado." });
+    }
+
+    await userRef.set(
+      {
+        editMode: false,
+        editScope: "none",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return res.json({ ok: true, uid, editMode: false, editScope: "none" });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao concluir modo de edicao",
+      details: String(error.message || error),
+    });
   }
 });
 
