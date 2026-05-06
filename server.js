@@ -1,4 +1,4 @@
-require("dotenv").config();
+ï»¿require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
@@ -16,13 +16,13 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
-const bucket = admin.storage().bucket();
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "80mb" }));
 
 const client = new vision.ImageAnnotatorClient();
 const FIREBASE_WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY;
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "spx-motorista-parceiro";
 
 function normalizePhoneBR(raw = "") {
   const digits = String(raw).replace(/\D/g, "");
@@ -35,13 +35,40 @@ function userDocId(phone) {
   return phone.replace(/[^\d+]/g, "");
 }
 
+function normalizePhoneDigits(raw = "") {
+  return String(raw).replace(/\D/g, "");
+}
+
 function resolveCanUploadPhotos(userData = {}) {
   if (userData.canUploadPhotos === true) return true;
   if (userData.role === "master" || userData.role === "admin2") return true;
   return false;
 }
 
+function resolveEditMode(userData = {}) {
+  return userData.editMode === true;
+}
+
 const PHOTO_KEYS = ["placa", "placa2", "tela6", "tela11"];
+
+function getStorageBucketCandidates() {
+  return Array.from(
+    new Set(
+      [
+        process.env.FIREBASE_STORAGE_BUCKET,
+        `${FIREBASE_PROJECT_ID}.firebasestorage.app`,
+        `${FIREBASE_PROJECT_ID}.appspot.com`,
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function isBucketMissingError(error) {
+  const message = String((error && error.message) || error || "").toLowerCase();
+  return message.includes("specified bucket does not exist");
+}
 
 async function requireAuth(req, res, next) {
   try {
@@ -53,6 +80,37 @@ async function requireAuth(req, res, next) {
 
     req.user = await admin.auth().verifyIdToken(match[1]);
     return next();
+  } catch (error) {
+    return res.status(401).json({ error: "Sessao invalida.", details: String(error.message || error) });
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    await new Promise((resolve, reject) => {
+      requireAuth(req, res, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+
+    const uid = req.user?.uid || "";
+    const phoneDigits = normalizePhoneDigits(uid);
+    if (phoneDigits === "21978818116" || phoneDigits === "5521978818116") {
+      return next();
+    }
+
+    if (req.user?.role === "master" || req.user?.role === "admin2" || req.user?.adminMaster === true) {
+      return next();
+    }
+
+    const adminSnap = await db.collection("users").doc(uid).get();
+    const adminData = adminSnap.exists ? adminSnap.data() || {} : {};
+    if (adminData.role === "master" || adminData.role === "admin2") {
+      return next();
+    }
+
+    return res.status(403).json({ error: "Acesso administrativo requerido." });
   } catch (error) {
     return res.status(401).json({ error: "Sessao invalida.", details: String(error.message || error) });
   }
@@ -82,27 +140,70 @@ async function uploadPhoto(uid, key, dataUrl) {
   if (!parsed) return null;
 
   const path = photoPath(uid, key, parsed.extension);
-  await bucket.file(path).save(parsed.buffer, {
-    resumable: false,
-    contentType: parsed.mimeType,
-    metadata: {
-      cacheControl: "private, max-age=0, no-transform",
-    },
-  });
+  let lastError = null;
+  console.log("[PHOTOS] upload_start", { uid, key, path, bytes: parsed.buffer.length });
 
-  return {
-    path,
-    mimeType: parsed.mimeType,
-  };
+  for (const bucketName of getStorageBucketCandidates()) {
+    try {
+      const bucket = admin.storage().bucket(bucketName);
+      await bucket.file(path).save(parsed.buffer, {
+        resumable: false,
+        contentType: parsed.mimeType,
+        metadata: {
+          cacheControl: "private, max-age=0, no-transform",
+        },
+      });
+
+      return {
+        path,
+        mimeType: parsed.mimeType,
+        bucket: bucketName,
+      };
+    } catch (error) {
+      console.log("[PHOTOS] upload_bucket_error", {
+        uid,
+        key,
+        bucketName,
+        error: String((error && error.message) || error),
+      });
+      lastError = error;
+      if (!isBucketMissingError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("Nenhum bucket de storage disponivel.");
 }
 
-async function downloadPhotoDataUrl(path, mimeType) {
+async function downloadPhotoDataUrl(path, mimeType, storedBucketName) {
   if (!path) return "";
-  const file = bucket.file(path);
-  const [exists] = await file.exists();
-  if (!exists) return "";
-  const [buffer] = await file.download();
-  return `data:${mimeType || "image/jpeg"};base64,${buffer.toString("base64")}`;
+  const bucketNames = Array.from(
+    new Set([storedBucketName, ...getStorageBucketCandidates()].filter(Boolean))
+  );
+  let lastError = null;
+
+  for (const bucketName of bucketNames) {
+    try {
+      const bucket = admin.storage().bucket(bucketName);
+      const file = bucket.file(path);
+      const [exists] = await file.exists();
+      if (!exists) continue;
+      const [buffer] = await file.download();
+      return `data:${mimeType || "image/jpeg"};base64,${buffer.toString("base64")}`;
+    } catch (error) {
+      lastError = error;
+      if (!isBucketMissingError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  if (lastError && !isBucketMissingError(lastError)) {
+    throw lastError;
+  }
+
+  return "";
 }
 
 function buildPhotoStatus(fields = {}) {
@@ -177,6 +278,7 @@ app.post("/auth/register", async (req, res) => {
       passwordHash,
       role,
       canUploadPhotos,
+      editMode: false,
       active: true,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -223,6 +325,9 @@ app.post("/auth/login", async (req, res) => {
     }
 
     const data = snap.data() || {};
+    if (data.active === false) {
+      return res.status(403).json({ error: "Acesso ao aplicativo bloqueado pelo administrador." });
+    }
     const ok = await bcrypt.compare(password, data.passwordHash || "");
     if (!ok) {
       return res.status(401).json({ error: "Senha incorreta." });
@@ -230,6 +335,7 @@ app.post("/auth/login", async (req, res) => {
 
     const role = data.role === "admin2" ? "admin2" : data.role === "master" ? "master" : "user";
     const canUploadPhotos = resolveCanUploadPhotos(data);
+    const editMode = resolveEditMode(data);
     const claims = role === "master" ? { role, adminMaster: true, canUploadPhotos } : { role, canUploadPhotos };
     const customToken = await admin.auth().createCustomToken(uid, claims);
     const tokenPayload = await exchangeCustomTokenForIdToken(customToken);
@@ -247,6 +353,7 @@ app.post("/auth/login", async (req, res) => {
       phone,
       role,
       canUploadPhotos,
+      editMode,
       customToken,
       idToken: tokenPayload.idToken,
       refreshToken: tokenPayload.refreshToken,
@@ -258,10 +365,85 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
+app.get("/admin/users", requireAdmin, async (_req, res) => {
+  try {
+    const snap = await db.collection("users").orderBy("phone").get();
+    const users = snap.docs.map((doc) => {
+      const data = doc.data() || {};
+      return {
+        uid: doc.id,
+        phone: data.phone || doc.id,
+        role: data.role === "admin2" ? "admin2" : data.role === "master" ? "master" : "user",
+        active: data.active !== false,
+        editMode: data.editMode === true,
+        canUploadPhotos: resolveCanUploadPhotos(data),
+      };
+    });
+
+    return res.json({ ok: true, users });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao listar usuarios", details: String(error.message || error) });
+  }
+});
+
+app.patch("/admin/users/:uid", requireAdmin, async (req, res) => {
+  try {
+    const uid = String(req.params.uid || "").trim();
+    if (!uid) {
+      return res.status(400).json({ error: "Usuario invalido." });
+    }
+
+    const userRef = db.collection("users").doc(uid);
+    const snap = await userRef.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Usuario nao encontrado." });
+    }
+
+    const updates = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (typeof req.body?.active === "boolean") {
+      updates.active = req.body.active;
+    }
+
+    if (typeof req.body?.editMode === "boolean") {
+      updates.editMode = req.body.editMode;
+    }
+
+    await userRef.set(updates, { merge: true });
+    const merged = { ...(snap.data() || {}), ...req.body, ...updates };
+
+    return res.json({
+      ok: true,
+      user: {
+        uid,
+        phone: merged.phone || uid,
+        role: merged.role === "admin2" ? "admin2" : merged.role === "master" ? "master" : "user",
+        active: merged.active !== false,
+        editMode: merged.editMode === true,
+        canUploadPhotos: resolveCanUploadPhotos(merged),
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao atualizar usuario", details: String(error.message || error) });
+  }
+});
+
 app.post("/photos/sync", requireAuth, async (req, res) => {
   try {
     const uid = req.user.uid;
     const photos = req.body?.photos || {};
+    console.log("[PHOTOS] sync_request", {
+      uid,
+      keys: Object.keys(photos || {}),
+      hasPlaca: !!photos.placa,
+      hasPlaca2: !!photos.placa2,
+      hasTela6: !!photos.tela6,
+      hasTela11: !!photos.tela11,
+    });
     const photoRef = db.collection("userPhotos").doc(uid);
     const currentSnap = await photoRef.get();
     const current = currentSnap.exists ? currentSnap.data() || {} : {};
@@ -278,10 +460,15 @@ app.post("/photos/sync", requireAuth, async (req, res) => {
       if (!uploaded) continue;
       updates[`${key}Path`] = uploaded.path;
       updates[`${key}MimeType`] = uploaded.mimeType;
+      updates[`${key}Bucket`] = uploaded.bucket;
     }
 
     await photoRef.set(updates, { merge: true });
     const saved = { ...current, ...updates };
+    console.log("[PHOTOS] sync_success", {
+      uid,
+      requiredComplete: buildPhotoStatus(saved).requiredComplete,
+    });
 
     return res.json({
       ok: true,
@@ -289,7 +476,7 @@ app.post("/photos/sync", requireAuth, async (req, res) => {
       updatedAtIso: saved.updatedAtIso || "",
     });
   } catch (error) {
-    console.error(error);
+    console.error("[PHOTOS] sync_error", error);
     return res.status(500).json({ error: "Falha ao sincronizar fotos", details: String(error.message || error) });
   }
 });
@@ -297,8 +484,10 @@ app.post("/photos/sync", requireAuth, async (req, res) => {
 app.get("/photos/me", requireAuth, async (req, res) => {
   try {
     const uid = req.user.uid;
+    console.log("[PHOTOS] me_request", { uid });
     const snap = await db.collection("userPhotos").doc(uid).get();
     if (!snap.exists) {
+      console.log("[PHOTOS] me_not_found", { uid });
       return res.json({
         ok: true,
         exists: false,
@@ -313,9 +502,20 @@ app.get("/photos/me", requireAuth, async (req, res) => {
     }
 
     const data = snap.data() || {};
+    console.log("[PHOTOS] me_found", {
+      uid,
+      hasPlaca: !!data.placaPath,
+      hasTela6: !!data.tela6Path,
+      hasTela11: !!data.tela11Path,
+      hasPlaca2: !!data.placa2Path,
+    });
     const photos = {};
     for (const key of PHOTO_KEYS) {
-      photos[key] = await downloadPhotoDataUrl(data[`${key}Path`], data[`${key}MimeType`]);
+      photos[key] = await downloadPhotoDataUrl(
+        data[`${key}Path`],
+        data[`${key}MimeType`],
+        data[`${key}Bucket`]
+      );
     }
 
     return res.json({
@@ -343,7 +543,7 @@ function extractTrackingCode(text) {
 function extractAddress(lines) {
   const joined = lines.join("\n");
   const patterns = [
-    /((?:Rua|R\.|Avenida|Av\.|Travessa|Tv\.|Alameda|Praça|Praca|Rodovia)\s+.+)/i,
+    /((?:Rua|R\.|Avenida|Av\.|Travessa|Tv\.|Alameda|PraÃ§a|Praca|Rodovia)\s+.+)/i,
   ];
 
   for (const pattern of patterns) {
@@ -364,7 +564,7 @@ function extractRecipientName(lines, trackingCode, address) {
     .filter((line) => line !== address)
     .filter(
       (line) =>
-        !/\b(?:Rua|R\.|Avenida|Av\.|Travessa|Tv\.|Alameda|Praça|Praca|Rodovia)\b/i.test(
+        !/\b(?:Rua|R\.|Avenida|Av\.|Travessa|Tv\.|Alameda|PraÃ§a|Praca|Rodovia)\b/i.test(
           line
         )
     )
