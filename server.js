@@ -223,11 +223,23 @@ function ensureCanManageTarget(req, res, targetUid, targetData = {}) {
 }
 
 function parseDataUrl(dataUrl = "") {
-  const match = String(dataUrl).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-  if (!match) return null;
+  const raw = String(dataUrl || "").trim();
+  const base64Match = raw.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  const utf8SvgMatch = raw.match(/^data:(image\/svg\+xml);utf8,(.+)$/i);
 
-  const mimeType = match[1];
-  const base64 = match[2];
+  let mimeType = "";
+  let buffer = null;
+
+  if (base64Match) {
+    mimeType = base64Match[1];
+    buffer = Buffer.from(base64Match[2], "base64");
+  } else if (utf8SvgMatch) {
+    mimeType = utf8SvgMatch[1];
+    buffer = Buffer.from(decodeURIComponent(utf8SvgMatch[2]), "utf8");
+  } else {
+    return null;
+  }
+
   const extension = mimeType.includes("svg")
     ? "svg"
     : mimeType.includes("png")
@@ -239,7 +251,7 @@ function parseDataUrl(dataUrl = "") {
   return {
     mimeType,
     extension,
-    buffer: Buffer.from(base64, "base64"),
+    buffer,
   };
 }
 
