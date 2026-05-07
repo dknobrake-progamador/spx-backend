@@ -490,6 +490,10 @@ export default function PainelAdmin() {
     if (item.action === "delete_user") return `Excluiu ${item.targetUid}`;
     if (item.action === "update_password") return `Atualizou senha de ${item.targetUid}`;
     if (item.action === "update_user") return `Atualizou acesso de ${item.targetUid}`;
+    if (item.action === "apply_generated_plate") return `Aplicou placa gerada em ${item.targetUid}`;
+    if (item.action === "update_signup_request") return `Atualizou solicitacao de cadastro de ${item.targetUid}`;
+    if (item.action === "update_admin_config") return "Atualizou configuracoes administrativas";
+    if (item.action === "clear_screens") return `Excluiu todas as telas de ${item.targetUid}`;
     return `${item.action} em ${item.targetUid}`;
   }
 
