@@ -2,6 +2,7 @@ import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   SafeAreaView,
@@ -193,6 +194,45 @@ export default function PainelAdm() {
     }
   }
 
+  function confirmarExcluirTelas(uid: string, phone: string) {
+    Alert.alert(
+      "Excluir todas as telas",
+      `Remover todas as telas/fotos de ${phone}?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: () => excluirTelasUsuario(uid),
+        },
+      ]
+    );
+  }
+
+  async function excluirTelasUsuario(uid: string) {
+    const idToken = await getAuthIdToken();
+    if (!idToken) return;
+
+    setUpdatingUid(uid);
+    try {
+      await apiRequest<{ ok: boolean; uid: string; cleared: boolean }>(
+        `/admin/users/${encodeURIComponent(uid)}/clear-screens`,
+        {
+          method: "POST",
+          idToken,
+          timeoutMs: 30000,
+        }
+      );
+      Alert.alert("Telas excluidas", "Todas as telas/fotos desse usuario foram removidas.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha ao excluir telas.";
+      setErrorMessage(message);
+      Alert.alert("Erro", message);
+    } finally {
+      setUpdatingUid(null);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.screen}>
       <FlatList
@@ -332,15 +372,15 @@ export default function PainelAdm() {
 
               <View style={styles.controlCard}>
                 <View style={styles.controlText}>
-                  <Text style={styles.controlTitle}>Autorizar edicao</Text>
+                  <Text style={styles.controlTitle}>Edicao de placa</Text>
                   <Text style={styles.controlHelper}>
-                    Libera a troca das imagens no proximo acesso.
+                    Libera apenas a edicao da Placa 1 no proximo acesso.
                   </Text>
                 </View>
                 <Pressable
                   onPress={() =>
                     atualizarUsuario(item.uid, {
-                      editScope: editing ? "none" : "all",
+                      editScope: editing ? "none" : "tela4",
                       editMode: !editing,
                     })
                   }
@@ -355,6 +395,14 @@ export default function PainelAdm() {
                   </Text>
                 </Pressable>
               </View>
+
+              <Pressable
+                onPress={() => confirmarExcluirTelas(item.uid, item.phone)}
+                disabled={busy}
+                style={styles.dangerAction}
+              >
+                <Text style={styles.dangerActionText}>Excluir todas as telas</Text>
+              </Pressable>
             </View>
           );
         }}
@@ -559,6 +607,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#27272a",
     padding: 16,
+  },
+  dangerAction: {
+    minHeight: 46,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#7f1d1d",
+    borderWidth: 1,
+    borderColor: "#ef4444",
+  },
+  dangerActionText: {
+    color: "#fafafa",
+    fontSize: 13,
+    fontWeight: "900",
+    textTransform: "uppercase",
   },
   cardTop: {
     flexDirection: "row",

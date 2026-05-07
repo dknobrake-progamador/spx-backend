@@ -139,6 +139,10 @@ export default function PainelAdmin() {
         idToken,
         timeoutMs: 30000,
       });
+      if (access.access !== "master") {
+        router.replace("/painel-adm");
+        return;
+      }
       const [config, data, audit, requests] = await Promise.all([
         apiRequest<{ ok: boolean; registrationEnabled: boolean }>("/admin/config", {
           idToken,

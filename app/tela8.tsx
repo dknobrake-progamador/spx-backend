@@ -136,8 +136,12 @@ export default function Tela8() {
 
   async function abrirPainelOperacional() {
     const access = await getCurrentAdminAccess();
-    if (access === "master" || access === "admin2") {
+    if (access === "master") {
       router.push("/painel-admin");
+      return;
+    }
+    if (access === "admin2") {
+      router.push("/painel-adm");
     }
   }
 
