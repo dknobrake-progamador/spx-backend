@@ -16,6 +16,7 @@ export const KEY_TELA6 = "@DEV_TELA6_URI";
 export const KEY_TELA11 = "@DEV_TELA11_URI";
 export const KEY_TELA3_CALL_COUNT = "@DEV_TELA3_CALL_COUNT";
 export const KEY_TELA3_CALL_LOG = "@DEV_TELA3_CALL_LOG";
+export const KEY_TELA3_OCCURRENCE_COUNT = "@DEV_TELA3_OCCURRENCE_COUNT";
 export const KEY_TELA3_OCCURRENCE_ACTIVE = "@DEV_TELA3_OCCURRENCE_ACTIVE";
 export const KEY_TELA3_OCCURRENCE_VARIANT = "@DEV_TELA3_OCCURRENCE_VARIANT";
 export const KEY_TELA3_PRIMARY_SCREEN = "@DEV_TELA3_PRIMARY_SCREEN";
@@ -358,6 +359,52 @@ export async function getTela3CallCount() {
 export async function getTela3CallLog() {
   const raw = await AsyncStorage.getItem(KEY_TELA3_CALL_LOG);
   return raw ? JSON.parse(raw) : [];
+}
+
+export async function setTela3OccurrenceCount(count: number) {
+  const normalized = Math.max(1, Math.min(15, Math.floor(Number(count) || 1)));
+  await AsyncStorage.setItem(KEY_TELA3_OCCURRENCE_COUNT, String(normalized));
+
+  const idToken = await getAuthIdToken();
+  if (!idToken) return normalized;
+
+  try {
+    await apiRequest<{ ok: boolean; occurrenceCount: number }>("/me/occurrence-count", {
+      method: "PATCH",
+      idToken,
+      timeoutMs: 20000,
+      body: { occurrenceCount: normalized },
+    });
+  } catch {
+    // Keep local value when network/backend is unavailable.
+  }
+
+  return normalized;
+}
+
+export async function getTela3OccurrenceCount(defaultValue = 5) {
+  const localRaw = await AsyncStorage.getItem(KEY_TELA3_OCCURRENCE_COUNT);
+  const localValue = Number(localRaw);
+  const fallback = Math.max(1, Math.min(15, Math.floor(defaultValue || 5)));
+
+  const idToken = await getAuthIdToken();
+  if (!idToken) {
+    if (Number.isFinite(localValue) && localValue >= 1) return Math.min(15, Math.floor(localValue));
+    return fallback;
+  }
+
+  try {
+    const data = await apiRequest<{ ok: boolean; occurrenceCount: number }>("/me/occurrence-count", {
+      idToken,
+      timeoutMs: 20000,
+    });
+    const cloudValue = Math.max(1, Math.min(15, Math.floor(Number(data.occurrenceCount) || fallback)));
+    await AsyncStorage.setItem(KEY_TELA3_OCCURRENCE_COUNT, String(cloudValue));
+    return cloudValue;
+  } catch {
+    if (Number.isFinite(localValue) && localValue >= 1) return Math.min(15, Math.floor(localValue));
+    return fallback;
+  }
 }
 
 export async function setTela3OccurrenceActive(active: boolean) {
@@ -797,6 +844,7 @@ export async function clearDevUris() {
     KEY_TELA11,
     KEY_TELA3_CALL_COUNT,
     KEY_TELA3_CALL_LOG,
+    KEY_TELA3_OCCURRENCE_COUNT,
     KEY_TELA3_OCCURRENCE_ACTIVE,
     KEY_TELA3_OCCURRENCE_VARIANT,
     KEY_SCANNED_BR_CODE,

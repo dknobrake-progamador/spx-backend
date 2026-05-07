@@ -5,8 +5,10 @@ import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInp
 import { RefreshAnimado, useRefreshAnimado } from "../components/refresh animado";
 import {
   getAllScannedOccurrences,
+  getTela3OccurrenceCount,
   getScannedOccurrence,
   getTela3PrimaryScreen,
+  setTela3OccurrenceCount,
   setTela3PrimaryScreen,
   type ScannedOccurrence,
   type Tela3PrimaryScreen,
@@ -70,8 +72,10 @@ export default function Tela3() {
         const principal = await getTela3PrimaryScreen();
         const ocorrenciasPorIndice = await getAllScannedOccurrences();
         const fallbackPrimeiroCard = await getScannedOccurrence();
+        const quantidadeSalva = await getTela3OccurrenceCount(dados.ocorrencias.length);
         if (ativo) {
           setTelaPrincipal(principal);
+          setQuantidadeOcorrencias(quantidadeSalva);
           setOcorrenciasCapturadas(
             fallbackPrimeiroCard && !ocorrenciasPorIndice[0]
               ? { 0: fallbackPrimeiroCard, ...ocorrenciasPorIndice }
@@ -127,13 +131,14 @@ export default function Tela3() {
     setModalQuantidadeVisivel(true);
   }
 
-  function salvarQuantidade() {
+  async function salvarQuantidade() {
     const numero = Number.parseInt(quantidadeInput.trim(), 10);
     if (!Number.isFinite(numero) || numero < 1) {
       return;
     }
     const limite = Math.min(numero, MAX_OCORRENCIAS);
-    setQuantidadeOcorrencias(limite);
+    const persisted = await setTela3OccurrenceCount(limite);
+    setQuantidadeOcorrencias(persisted);
     setModalQuantidadeVisivel(false);
   }
 

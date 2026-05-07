@@ -147,16 +147,27 @@ export default function Tela10() {
       });
 
       if (mode === "register") {
-        setStatus("Recebemos seus dados. Aguarde alguns instantes e tente entrar novamente.");
+        setStatus("Sem conexao. Verifique sua internet.");
         return;
       }
 
       await finishAuth(data);
-    } catch {
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "";
+      const isConnectionError =
+        /network request failed|failed to fetch|timeout|timed out|aborted|sem conexao|sem conexão|conexao|conexão/i.test(
+          rawMessage
+        );
+      const isWrongPassword =
+        /senha incorreta|senha errada|wrong password|invalid password/i.test(rawMessage);
       const message =
         mode === "login"
-          ? "Nao foi possivel entrar. Verifique seus dados e tente novamente."
-          : "Nao foi possivel continuar. Tente novamente em instantes.";
+          ? isWrongPassword
+            ? "Senha errada."
+            : "Nao foi possivel entrar. Verifique seus dados e tente novamente."
+          : isConnectionError
+            ? "Sem conexao. Verifique sua internet."
+            : "Nao foi possivel concluir sua solicitacao de cadastro. Tente novamente em instantes.";
       setStatus(message);
     } finally {
       setLoading(false);
