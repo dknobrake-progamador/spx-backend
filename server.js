@@ -570,6 +570,58 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
+app.get("/me/occurrence-count", requireAuth, async (req, res) => {
+  try {
+    const uid = String(req.user?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "Sessao invalida." });
+    }
+
+    const userSnap = await db.collection("users").doc(uid).get();
+    const data = userSnap.exists ? userSnap.data() || {} : {};
+    const occurrenceCount = Math.max(1, Math.min(15, Number.parseInt(String(data.occurrenceCount || 5), 10) || 5));
+
+    return res.json({
+      ok: true,
+      occurrenceCount,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao carregar quantidade de ocorrencias." });
+  }
+});
+
+app.patch("/me/occurrence-count", requireAuth, async (req, res) => {
+  try {
+    const uid = String(req.user?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "Sessao invalida." });
+    }
+
+    const parsed = Number.parseInt(String(req.body?.occurrenceCount || ""), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return res.status(400).json({ error: "Quantidade invalida." });
+    }
+    const occurrenceCount = Math.max(1, Math.min(15, parsed));
+
+    await db.collection("users").doc(uid).set(
+      {
+        occurrenceCount,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return res.json({
+      ok: true,
+      occurrenceCount,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao salvar quantidade de ocorrencias." });
+  }
+});
+
 app.get("/admin/users", requireAdmin, async (_req, res) => {
   try {
     const snap = await db.collection("users").orderBy("phone").get();
