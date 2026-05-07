@@ -494,7 +494,7 @@ export default function PainelAdmin() {
   }
 
   function renderRoleLabel(role: AdminUser["role"]) {
-    if (role === "admin2") return "Admin";
+    if (role === "admin2") return "Administrador";
     if (role === "master") return "Protegido";
     return "Usuario";
   }
@@ -817,7 +817,7 @@ export default function PainelAdmin() {
               <View style={styles.cardTop}>
                 <View style={styles.identityBlock}>
                   <Text style={styles.phone}>{item.phone}</Text>
-                  <Text style={styles.uid}>Login: {item.uid}</Text>
+                  <Text style={styles.uid}>Usuario: {item.uid}</Text>
                 </View>
                 <View style={styles.roleBadge}>
                   <Text style={styles.role}>{renderRoleLabel(item.role)}</Text>
