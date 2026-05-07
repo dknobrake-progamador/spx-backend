@@ -228,7 +228,13 @@ function parseDataUrl(dataUrl = "") {
 
   const mimeType = match[1];
   const base64 = match[2];
-  const extension = mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg";
+  const extension = mimeType.includes("svg")
+    ? "svg"
+    : mimeType.includes("png")
+      ? "png"
+      : mimeType.includes("webp")
+        ? "webp"
+        : "jpg";
 
   return {
     mimeType,
@@ -901,6 +907,78 @@ app.get("/admin/users/:uid/photos", requireMaster, async (req, res) => {
     console.error(error);
     return res.status(500).json({
       error: "Falha ao carregar fotos do usuario",
+      details: String(error.message || error),
+    });
+  }
+});
+
+app.post("/admin/generated-plate", requireAdmin, async (req, res) => {
+  try {
+    const login = normalizePhoneBR(req.body?.login || "");
+    const slot = String(req.body?.slot || "").trim().toLowerCase();
+    const imageDataUrl = String(req.body?.imageDataUrl || "").trim();
+
+    if (!login || login.length < 12) {
+      return res.status(400).json({ error: "Login invalido." });
+    }
+
+    if (slot !== "placa" && slot !== "placa2") {
+      return res.status(400).json({ error: "Destino invalido." });
+    }
+
+    if (!imageDataUrl.startsWith("data:image/")) {
+      return res.status(400).json({ error: "Imagem invalida." });
+    }
+
+    const uid = userDocId(login);
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: "Usuario nao encontrado." });
+    }
+
+    const userData = userSnap.data() || {};
+    if (!ensureCanManageTarget(req, res, uid, userData)) {
+      return;
+    }
+
+    const photoRef = db.collection("userPhotos").doc(uid);
+    const currentSnap = await photoRef.get();
+    const current = currentSnap.exists ? currentSnap.data() || {} : {};
+    const uploaded = await uploadPhoto(uid, slot, imageDataUrl);
+    if (!uploaded) {
+      return res.status(400).json({ error: "Falha ao gerar imagem." });
+    }
+
+    await photoRef.set(
+      {
+        uid,
+        phone: userData.phone || uid,
+        [`${slot}Path`]: uploaded.path,
+        [`${slot}MimeType`]: uploaded.mimeType,
+        [`${slot}Bucket`]: uploaded.bucket,
+        updatedAtIso: new Date().toISOString(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    await writeAdminAudit(req.user?.uid, "apply_generated_plate", uid, {
+      phone: userData.phone || uid,
+      slot,
+    });
+
+    return res.json({
+      ok: true,
+      uid,
+      phone: userData.phone || uid,
+      slot,
+      updatedAtIso: current.updatedAtIso || new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao aplicar placa gerada",
       details: String(error.message || error),
     });
   }
