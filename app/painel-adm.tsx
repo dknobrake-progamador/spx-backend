@@ -415,7 +415,7 @@ export default function PainelAdm() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#050505",
+    backgroundColor: "#06131f",
   },
   listContent: {
     padding: 16,
@@ -437,8 +437,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    backgroundColor: "#111111",
+    borderColor: "#1d4f73",
+    backgroundColor: "#0a2234",
   },
   backText: {
     color: "#fafafa",
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   eyebrow: {
-    color: "#22c55e",
+    color: "#38bdf8",
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
@@ -458,7 +458,7 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   heroText: {
-    color: "#a1a1aa",
+    color: "#9fb3c8",
     fontSize: 14,
     lineHeight: 20,
   },
@@ -467,10 +467,10 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#facc15",
+    backgroundColor: "#0ea5e9",
   },
   primaryActionText: {
-    color: "#09090b",
+    color: "#03131e",
     fontSize: 15,
     fontWeight: "900",
     textTransform: "uppercase",
@@ -479,8 +479,8 @@ const styles = StyleSheet.create({
     minHeight: 78,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#27272a",
-    backgroundColor: "#101010",
+    borderColor: "#1d4f73",
+    backgroundColor: "#0a1c2b",
     paddingHorizontal: 14,
     paddingVertical: 12,
     flexDirection: "row",
@@ -491,8 +491,8 @@ const styles = StyleSheet.create({
   controlCardStack: {
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#27272a",
-    backgroundColor: "#101010",
+    borderColor: "#1d4f73",
+    backgroundColor: "#0a1c2b",
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 10,
@@ -507,26 +507,26 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   controlHelper: {
-    color: "#a1a1aa",
+    color: "#9fb3c8",
     fontSize: 13,
     lineHeight: 18,
   },
   requestCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    backgroundColor: "#0b0b0b",
+    borderColor: "#2a5f84",
+    backgroundColor: "#0b1b29",
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 4,
   },
   requestPhone: {
-    color: "#facc15",
+    color: "#7dd3fc",
     fontSize: 15,
     fontWeight: "800",
   },
   requestMeta: {
-    color: "#a1a1aa",
+    color: "#9fb3c8",
     fontSize: 12,
   },
   requestActions: {
@@ -543,10 +543,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   requestActionApprove: {
-    backgroundColor: "#166534",
+    backgroundColor: "#0f766e",
   },
   requestActionBlock: {
-    backgroundColor: "#92400e",
+    backgroundColor: "#9a3412",
   },
   requestActionDelete: {
     backgroundColor: "#7f1d1d",
@@ -565,16 +565,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   stateButtonGreen: {
-    backgroundColor: "#166534",
+    backgroundColor: "#0f766e",
   },
   stateButtonRed: {
     backgroundColor: "#7f1d1d",
   },
   stateButtonYellow: {
-    backgroundColor: "#facc15",
+    backgroundColor: "#38bdf8",
   },
   stateButtonOff: {
-    backgroundColor: "#27272a",
+    backgroundColor: "#1e3a4f",
   },
   stateButtonText: {
     color: "#fafafa",
@@ -583,14 +583,14 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   stateButtonTextDark: {
-    color: "#09090b",
+    color: "#03131e",
   },
   stateBox: {
     minHeight: 72,
     borderRadius: 18,
-    backgroundColor: "#101010",
+    backgroundColor: "#0a1c2b",
     borderWidth: 1,
-    borderColor: "#27272a",
+    borderColor: "#1d4f73",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
@@ -603,9 +603,9 @@ const styles = StyleSheet.create({
   userCard: {
     gap: 10,
     borderRadius: 24,
-    backgroundColor: "#09090b",
+    backgroundColor: "#081826",
     borderWidth: 1,
-    borderColor: "#27272a",
+    borderColor: "#1d4f73",
     padding: 16,
   },
   dangerAction: {
@@ -613,7 +613,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#7f1d1d",
+    backgroundColor: "#b91c1c",
     borderWidth: 1,
     borderColor: "#ef4444",
   },
@@ -635,7 +635,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   uid: {
-    color: "#71717a",
+    color: "#8aa3bb",
     fontSize: 12,
     marginTop: 3,
   },
@@ -645,13 +645,13 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#052e16",
+    backgroundColor: "#082f49",
     borderWidth: 1,
-    borderColor: "#166534",
+    borderColor: "#0ea5e9",
     paddingHorizontal: 12,
   },
   badgeText: {
-    color: "#4ade80",
+    color: "#7dd3fc",
     fontSize: 11,
     fontWeight: "900",
     textTransform: "uppercase",
