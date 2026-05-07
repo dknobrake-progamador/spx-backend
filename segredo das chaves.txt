@@ -1,0 +1,19 @@
+INVENTARIO DE SEGREDOS - NAO COMMITAR
+
+Este arquivo e apenas um template seguro. Nao armazene chaves reais aqui.
+
+Licencas:
+- [ ] Nenhuma identificada / revisar manualmente
+
+Chaves de API:
+- [ ] API 1: <preencher localmente>
+- [ ] API 2: <preencher localmente>
+
+Autenticacoes:
+- [ ] JWT / token de acesso: <preencher localmente>
+- [ ] Refresh token: <preencher localmente>
+- [ ] Credenciais de servico: <preencher localmente>
+
+Observacoes:
+- Armazenar valores reais apenas em cofre de segredos ou variaveis de ambiente.
+- Se for necessario versionar algo, use arquivos de exemplo como .env.example.

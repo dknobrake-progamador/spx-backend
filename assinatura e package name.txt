@@ -1,0 +1,31 @@
+PACKAGE NAME E ASSINATURA
+
+IDENTIDADE DO APP
+- Este arquivo e apenas um registro de referencia.
+- Ele nao substitui a assinatura real do APK.
+- Para atualizar sem perder a instalacao, o app novo precisa usar o mesmo package name e a mesma chave de assinatura.
+
+Package name:
+- com.douglasgabriel.apkshopee
+
+Expo owner:
+- 607070dg
+
+EAS projectId:
+- ce7e0ee0-25b2-4b8b-a1a4-bde026d13de5
+
+Assinatura:
+- Nao encontrada no workspace local.
+- Para atualizar o mesmo app instalado, use a mesma chave/keystore do APK original.
+- Se a assinatura estiver no EAS, consulte as credenciais do projeto ou o backup do keystore.
+- A chave privada nao pode ser recuperada do APK instalado.
+- O que pode ser visto e o certificado publico/fingerprint, nao a chave privada.
+
+Observacao:
+- Este arquivo nao contem segredos reais.
+
+Como localizar a assinatura:
+1. Se voce usa EAS, rode `eas credentials -p android` no projeto logado na conta correta.
+2. Verifique a secao Android Keystore / Upload Keystore.
+3. Se tiver o arquivo `.jks`, use `keytool -list -v -keystore seu-arquivo.jks` para ver SHA-1/SHA-256.
+4. Se o app foi publicado na Play Store com Play App Signing, a assinatura de distribuicao pode estar no console da Play Store.

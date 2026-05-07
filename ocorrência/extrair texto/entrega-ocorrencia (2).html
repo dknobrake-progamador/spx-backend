@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Entrega - Ocorrências</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif; }
+    body { background: #f0f0f0; display: flex; justify-content: center; }
+    .screen { background: #f0f0f0; width: 390px; min-height: 100vh; }
+    .statusbar { background: #fff; height: 36px; }
+    .topbar { background: #fff; display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 12px; border-bottom: 0.5px solid #e5e5e5; }
+    .topbar .left { display: flex; align-items: center; gap: 10px; }
+    .hamburger { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+    .hamburger span { display: block; width: 20px; height: 2px; background: #333; border-radius: 2px; }
+    .brand-pill { display: flex; align-items: center; gap: 7px; background: #f2f2f2; border-radius: 20px; padding: 6px 14px; }
+    .brand-pill span { font-size: 15px; font-weight: 500; color: #222; }
+    .topbar .right { display: flex; align-items: center; gap: 14px; }
+    .tabs { background: #fff; display: flex; border-bottom: 1.5px solid #e5e5e5; }
+    .tab { flex: 1; text-align: center; padding: 12px 0 10px; font-size: 14px; color: #888; cursor: pointer; position: relative; }
+    .tab.active { color: #222; font-weight: 500; }
+    .tab.active::after { content: ''; position: absolute; bottom: -1.5px; left: 10%; width: 80%; height: 2.5px; background: #e85d2a; border-radius: 2px; }
+    .content { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .card { background: #fff; border-radius: 10px; padding: 14px 16px; cursor: pointer; transition: box-shadow 0.2s; }
+    .card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+    .card-id { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #555; font-weight: 500; margin-bottom: 12px; }
+    .addr-row { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 6px; }
+    .addr-text { font-size: 15px; color: #222; line-height: 1.4; }
+    .person { font-size: 14px; color: #777; margin-bottom: 10px; }
+    .status-row { display: flex; align-items: center; gap: 7px; }
+    .status-dot { width: 18px; height: 18px; border-radius: 50%; background: #f5a623; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .status-dot::after { content: ''; width: 8px; height: 2px; background: #fff; border-radius: 1px; }
+    .status-text { font-size: 13px; color: #f5a623; font-weight: 500; }
+    .status-date { font-size: 13px; color: #f5a623; }
+    .upload-hint { font-size: 11px; color: #ccc; text-align: right; margin-top: 6px; }
+    #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: center; justify-content: center; flex-direction: column; gap: 14px; }
+    #overlay.visible { display: flex; }
+    .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .overlay-text { color: #fff; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+  <div id="overlay">
+    <div class="spinner"></div>
+    <span class="overlay-text" id="overlay-msg">Lendo imagem...</span>
+  </div>
+
+  <input type="file" id="input-imagem" accept="image/*" style="display:none" />
+
+  <div class="screen">
+    <div class="statusbar"></div>
+
+    <div class="topbar">
+      <div class="left">
+        <div class="hamburger"><span></span><span></span><span></span></div>
+        <div class="brand-pill">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/><path d="M16 15l-2-2 2-2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Entrega</span>
+        </div>
+      </div>
+      <div class="right">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab">Pendente (<span id="count-pendente">0</span>)</div>
+      <div class="tab active">Ocorrência (<span id="count-ocorrencia">0</span>)</div>
+      <div class="tab">Encerrado</div>
+    </div>
+
+    <div class="content" id="cards-container"></div>
+  </div>
+
+  <script>
+    const dados = {
+      pendente: 0,
+      ocorrencias: [
+        {
+          codigo: "BR26308889 4891K",
+          endereco: "Rua Mário Neves, 1, EcoPonte / Sampaio - Trafego",
+          pessoa: "Gabriel Sampaio_",
+          status: "Comércio Fechado",
+          data: "18-04-2026 11:13"
+        },
+        {
+          codigo: "BR26861768 7071X",
+          endereco: "Travessa George Alan, 3, Bar do Brito no campo",
+          pessoa: "Yasmim Gonçalves Da Silva_",
+          status: "Comércio Fechado",
+          data: "18-04-2026 11:13"
+        }
+      ]
+    };
+
+    let cardAlvoIndex = null;
+
+    const iconeCopiar = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+    const iconePin = `<svg width="15" height="15" viewBox="0 0 24 24" fill="#777" style="flex-shrink:0;margin-top:2px"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>`;
+
+    function renderCards() {
+      const container = document.getElementById('cards-container');
+      document.getElementById('count-pendente').textContent = dados.pendente;
+      document.getElementById('count-ocorrencia').textContent = dados.ocorrencias.length;
+      container.innerHTML = dados.ocorrencias.map((item, i) => `
+        <div class="card" onclick="abrirUpload(${i})">
+          <div class="card-id">${item.codigo} ${iconeCopiar}</div>
+          <div class="addr-row">${iconePin}<span class="addr-text">${item.endereco}</span></div>
+          <div class="person">${item.pessoa}</div>
+          <div class="status-row">
+            <div class="status-dot"></div>
+            <span class="status-text">${item.status}</span>
+            <span class="status-date">${item.data}</span>
+          </div>
+          <div class="upload-hint">toque para ler etiqueta</div>
+        </div>
+      `).join('');
+    }
+
+    function abrirUpload(index) {
+      cardAlvoIndex = index;
+      document.getElementById('input-imagem').click();
+    }
+
+    document.getElementById('input-imagem').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file || cardAlvoIndex === null) return;
+      e.target.value = '';
+      mostrarOverlay('Lendo imagem...');
+      try {
+        const { data: { text } } = await Tesseract.recognize(file, 'por+eng', {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              document.getElementById('overlay-msg').textContent =
+                'Processando... ' + Math.round(m.progress * 100) + '%';
+            }
+          }
+        });
+        console.log('=== TEXTO OCR ===\n', text); // útil para debug
+        const extraido = extrairCampos(text);
+        const card = dados.ocorrencias[cardAlvoIndex];
+        if (extraido.codigo)  card.codigo  = extraido.codigo;
+        if (extraido.endereco) card.endereco = extraido.endereco;
+        if (extraido.pessoa)  card.pessoa  = extraido.pessoa;
+        renderCards();
+      } catch (err) {
+        alert('Erro ao ler a imagem. Tente novamente.');
+        console.error(err);
+      } finally {
+        esconderOverlay();
+        cardAlvoIndex = null;
+      }
+    });
+
+    // ============================================================
+    // EXTRAÇÃO — padrão SPX Motorista Parceiro
+    // Código:   BR + 10~15 caracteres alfanuméricos
+    // Endereço: linha começando com tipo de logradouro
+    // Nome:     linha imediatamente após "Destinatário"
+    //           OU linha com "Destinatário" inline (ex: "Destinatário Lucas_")
+    // ============================================================
+    function extrairCampos(texto) {
+      const linhas = texto.split('\n').map(l => l.trim()).filter(Boolean);
+      const res = { codigo: null, endereco: null, pessoa: null };
+
+      const logradouros = /^(rua|av\.?|avenida|travessa|trav\.?|alameda|al\.?|estrada|estr\.?|rodovia|rod\.?|praça|pça\.?|largo|beco|vila|condomínio|cond\.?)/i;
+
+      for (let i = 0; i < linhas.length; i++) {
+        const linha = linhas[i];
+
+        // Código BR — BR seguido de 8 a 16 alfanuméricos
+        if (!res.codigo && /^BR[A-Z0-9]{8,16}$/i.test(linha.replace(/\s/g, ''))) {
+          res.codigo = linha.replace(/\s+/g, ' ').trim();
+        }
+
+        // Endereço
+        if (!res.endereco && logradouros.test(linha)) {
+          // pode continuar na linha seguinte (quebra de linha no OCR)
+          let end = linha;
+          if (i + 1 < linhas.length && !logradouros.test(linhas[i+1]) && !/^BR/i.test(linhas[i+1]) && !/destinat/i.test(linhas[i+1])) {
+            end += ' ' + linhas[i+1];
+          }
+          res.endereco = end;
+        }
+
+        // Nome — padrão SPX: "Destinatário" na linha, nome na próxima
+        if (!res.pessoa && /destinat[aá]rio/i.test(linha)) {
+          // caso "Destinatário\nNome Sobrenome_"
+          const proxima = linhas[i + 1] || '';
+          if (proxima && !/^BR/i.test(proxima) && !logradouros.test(proxima)) {
+            res.pessoa = proxima;
+          }
+          // caso "Destinatário Nome Sobrenome_" na mesma linha
+          const inline = linha.replace(/destinat[aá]rio[:\s]*/i, '').trim();
+          if (inline.length > 2) res.pessoa = inline;
+        }
+      }
+
+      return res;
+    }
+
+    function mostrarOverlay(msg) {
+      document.getElementById('overlay-msg').textContent = msg;
+      document.getElementById('overlay').classList.add('visible');
+    }
+    function esconderOverlay() {
+      document.getElementById('overlay').classList.remove('visible');
+    }
+
+    renderCards();
+  </script>
+</body>
+</html>

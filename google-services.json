@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "75116397763",
+    "project_id": "spx-motorista-parceiro",
+    "storage_bucket": "spx-motorista-parceiro.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:75116397763:android:efe36a98d22e50cf4cce76",
+        "android_client_info": {
+          "package_name": "com.douglasgabriel.apkshopee"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDrDgbrOX6jXrtQWhQZOMUGRWUtLkQQAx8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

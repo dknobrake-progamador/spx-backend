@@ -1,24 +1,47 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { Stack, router, usePathname } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
+import { View } from "react-native";
+import {
+  getTela11Uri,
+  getPlacaUri,
+  getTela6Uri,
+} from "../lib/devStorage";
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+export default function Layout() {
+  const pathname = usePathname();
+  const [liberado, setLiberado] = useState(false);
+  const bootedRef = useRef(false);
+  const publicPaths = ["/", "/tela10", "/upload-fotos", "/trocar-senha"];
+  const adminPaths = ["/painel-admin", "/painel-adm"];
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+  useEffect(() => {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+    if (!publicPaths.includes(pathname) && !adminPaths.includes(pathname)) {
+      router.replace("/");
+    }
+  }, [pathname]);
 
-  return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
-  );
+  useEffect(() => {
+    async function verificar() {
+      const [u4, u6, u11] = await Promise.all([
+        getPlacaUri(),
+        getTela6Uri(),
+        getTela11Uri(),
+      ]);
+
+      setLiberado(!!u4 && !!u6 && !!u11);
+    }
+
+    verificar();
+  }, [pathname]); // 🔥 AGORA VERIFICA SEMPRE QUE MUDA DE TELA
+
+  const permitido = publicPaths.includes(pathname) || adminPaths.includes(pathname);
+
+  if (!liberado && !permitido) {
+    return <View style={{ flex: 1, backgroundColor: "#fff" }} />;
+  }
+
+  return <Stack screenOptions={{ headerShown: false }} />;
 }

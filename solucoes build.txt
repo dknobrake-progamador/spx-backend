@@ -1,0 +1,72 @@
+SOLUCOES DO BUILD APK
+
+Projeto: apk-shopee
+Data: 2026-04-19
+
+1. Problema: comando `npm run lint` nao conseguiu rodar normalmente.
+Motivo encontrado:
+- O script `expo lint` falhou com `Permission denied`.
+- O binario local `node_modules/.bin/expo` estava sem permissao de execucao no ambiente atual.
+
+Solucao aplicada:
+- O lint foi executado chamando o CLI pelo Node:
+  `node ./node_modules/expo/bin/cli lint`
+- Esse comando ainda tentou chamar `eslint` diretamente e tambem falhou por permissao.
+- A validacao final foi feita com:
+  `node ./node_modules/eslint/bin/eslint.js app --ext .ts,.tsx`
+
+Resultado:
+- Nenhum erro novo da correcao feita.
+- Restaram apenas 2 warnings antigos do projeto:
+  - `app/index.tsx`: import `View` sem uso
+  - `app/tela8.tsx`: dependencias faltando no `useEffect`
+
+2. Problema: leitura da configuracao do app pelo EAS falhou.
+Motivo encontrado:
+- Durante o build, o EAS tentou executar:
+  `npx expo config --json`
+- Esse comando falhou com codigo `126`.
+- O motivo continua relacionado ao ambiente local com problema de permissao nos binarios executaveis do Expo.
+
+Solucao aplicada:
+- O EAS fez fallback automatico para a versao interna de `@expo/config` empacotada no proprio `eas-cli`.
+- Isso permitiu continuar o processo de build sem alterar o projeto.
+
+Resultado:
+- O build prosseguiu normalmente mesmo sem conseguir usar `npx expo config`.
+
+3. Problema: falha ao calcular o fingerprint automatico do projeto.
+Erro exibido:
+- `Failed to compute project fingerprint`
+- `Expected concurrency to be a number from 1 and up`
+
+Motivo encontrado:
+- Erro interno do `eas-cli` durante a etapa automatica de fingerprint, depois do upload do projeto.
+
+Solucao aplicada:
+- O build foi executado novamente com a variavel:
+  `EAS_SKIP_AUTO_FINGERPRINT=1`
+- Com isso, a etapa de fingerprint foi ignorada.
+
+Resultado:
+- O build foi enviado com sucesso para o Expo.
+- Link gerado para acompanhamento:
+  `https://expo.dev/accounts/gabriel211086/projects/apk-shopee/builds/f4507efe-483c-4394-b8f3-87a26573a1f1`
+
+4. Observacao importante sobre versao Android
+- O EAS incrementou automaticamente o `versionCode` remoto:
+  - de `4` para `5` na primeira tentativa
+  - de `5` para `6` na tentativa final bem-sucedida
+
+5. Ajuste de codigo feito antes do build
+Problema funcional corrigido:
+- As imagens importadas pelo app sumiam ao fechar o aplicativo ou reiniciar o telefone.
+
+Solucao aplicada:
+- As imagens agora sao copiadas para o armazenamento interno persistente do app com `expo-file-system`.
+- O helper `app/_devStorage.ts` foi alterado para salvar os arquivos em `documentDirectory/dev-images/`.
+- O caminho salvo no `AsyncStorage` agora aponta para a copia persistente, nao mais para o URI temporario da galeria.
+
+Resultado:
+- Imagens como `placa2` passam a continuar disponiveis apos fechar o app ou reiniciar o aparelho.
+- Essas imagens so serao removidas se o app for desinstalado ou se houver reset manual dentro do proprio app.

@@ -1,0 +1,266 @@
+export const OCR_WEBVIEW_HTML = String.raw`<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #111;
+        color: #fff;
+        font-family: Arial, sans-serif;
+      }
+      body {
+        display: flex;
+        min-height: 100vh;
+        align-items: center;
+        justify-content: center;
+      }
+      #status {
+        padding: 24px;
+        text-align: center;
+        line-height: 1.5;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  </head>
+  <body>
+    <div id="status">Aguardando imagem...</div>
+    <script>
+      const statusEl = document.getElementById("status");
+      const OCR_LANG = "por+eng";
+
+      function sendMessage(payload) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+      }
+
+      function updateStatus(message) {
+        statusEl.textContent = message;
+      }
+
+      function loadImage(imageUri) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error("Falha ao carregar imagem"));
+          img.src = imageUri;
+        });
+      }
+
+      function cropRegionToDataUrl(img, region, options = {}) {
+        const sourceX = Math.max(0, Math.floor(img.width * region.x));
+        const sourceY = Math.max(0, Math.floor(img.height * region.y));
+        const sourceWidth = Math.max(1, Math.floor(img.width * region.width));
+        const sourceHeight = Math.max(1, Math.floor(img.height * region.height));
+        const trimLeftPx = Math.max(0, options.trimLeftPx || 0);
+        const cropWidth = Math.max(1, sourceWidth - trimLeftPx);
+        const upscale = options.upscale || 2;
+
+        const sourceCanvas = document.createElement("canvas");
+        sourceCanvas.width = cropWidth;
+        sourceCanvas.height = sourceHeight;
+        const sourceCtx = sourceCanvas.getContext("2d");
+        sourceCtx.drawImage(
+          img,
+          sourceX + trimLeftPx,
+          sourceY,
+          cropWidth,
+          sourceHeight,
+          0,
+          0,
+          cropWidth,
+          sourceHeight
+        );
+
+        const outputCanvas = document.createElement("canvas");
+        outputCanvas.width = cropWidth * upscale;
+        outputCanvas.height = sourceHeight * upscale;
+        const outputCtx = outputCanvas.getContext("2d");
+        outputCtx.imageSmoothingEnabled = false;
+        outputCtx.drawImage(
+          sourceCanvas,
+          0,
+          0,
+          cropWidth,
+          sourceHeight,
+          0,
+          0,
+          outputCanvas.width,
+          outputCanvas.height
+        );
+
+        const imageData = outputCtx.getImageData(
+          0,
+          0,
+          outputCanvas.width,
+          outputCanvas.height
+        );
+        const { data } = imageData;
+
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = Math.round(
+            data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
+          );
+          const value = gray > 165 ? 255 : 0;
+          data[i] = value;
+          data[i + 1] = value;
+          data[i + 2] = value;
+        }
+
+        outputCtx.putImageData(imageData, 0, 0);
+        return outputCanvas.toDataURL("image/png");
+      }
+
+      async function recognizeRegion(regionImage, config, onProgress) {
+        return Tesseract.recognize(regionImage, OCR_LANG, {
+          ...config,
+          logger(message) {
+            if (message.status === "recognizing text" && onProgress) {
+              onProgress(Math.round((message.progress || 0) * 100));
+            }
+          },
+        });
+      }
+
+      function cleanTrackingCode(value) {
+        return (value || "")
+          .toUpperCase()
+          .replace(/[^A-Z0-9]/g, "")
+          .trim();
+      }
+
+      function cleanText(value) {
+        return (value || "")
+          .replace(/[ \t]+/g, " ")
+          .replace(/\n{2,}/g, "\n")
+          .trim();
+      }
+
+      // ── funcao principal ──
+      async function runOcr(imageUri) {
+        try {
+          updateStatus("Lendo imagem selecionada...");
+          sendMessage({ type: "progress", progress: 0 });
+          const img = await loadImage(imageUri);
+
+          const regions = [
+            {
+              key: "trackingCode",
+              label: "codigo",
+              area: { x: 0.08, y: 0.11, width: 0.84, height: 0.16 },
+              config: {
+                tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
+                tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+              },
+              normalize: cleanTrackingCode,
+            },
+            {
+              key: "address",
+              label: "endereco",
+              area: { x: 0.07, y: 0.30, width: 0.86, height: 0.34 },
+              preprocess: { trimLeftPx: 50, upscale: 2 },
+              config: {
+                tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+              },
+              normalize: cleanText,
+            },
+            {
+              key: "statusDate",
+              label: "status",
+              area: { x: 0.07, y: 0.68, width: 0.86, height: 0.18 },
+              config: {
+                tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
+              },
+              normalize: cleanText,
+            },
+          ];
+
+          const fields = {};
+
+          for (let i = 0; i < regions.length; i++) {
+            const region = regions[i];
+            const baseProgress = Math.round((i / regions.length) * 100);
+            const regionImage = cropRegionToDataUrl(
+              img,
+              region.area,
+              region.preprocess || { upscale: 2 }
+            );
+
+            updateStatus(
+              "Lendo " + region.label + " (" + (i + 1) + "/" + regions.length + ")..."
+            );
+            sendMessage({ type: "progress", progress: baseProgress });
+
+            const result = await recognizeRegion(regionImage, region.config, (pct) => {
+              const overall = Math.round(
+                ((i + pct / 100) / regions.length) * 100
+              );
+              updateStatus(
+                "Lendo " +
+                  region.label +
+                  " (" +
+                  (i + 1) +
+                  "/" +
+                  regions.length +
+                  ")... " +
+                  pct +
+                  "%"
+              );
+              sendMessage({ type: "progress", progress: overall });
+            });
+
+            fields[region.key] = region.normalize(result?.data?.text || "");
+          }
+
+          const response = {
+            trackingCode: fields.trackingCode || "",
+            address: fields.address || "",
+            statusDate: fields.statusDate || "",
+            rawText: cleanText(
+              [
+                fields.trackingCode || "",
+                fields.address || "",
+                fields.statusDate || "",
+              ].join("\n")
+            ),
+          };
+
+          sendMessage({ type: "progress", progress: 100 });
+          sendMessage({
+            type: "result",
+            text: response.rawText,
+            fields: response,
+          });
+
+        } catch (error) {
+          sendMessage({
+            type: "error",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      window.startOcr = runOcr;
+
+      window.addEventListener("message", async (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.type === "start" && payload.imageUri) {
+            await runOcr(payload.imageUri);
+          }
+        } catch (error) {
+          sendMessage({
+            type: "error",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+
+      sendMessage({ type: "ready" });
+    </script>
+  </body>
+</html>`;
