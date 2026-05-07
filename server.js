@@ -76,6 +76,25 @@ function resolveMustChangePassword(userData = {}) {
   return userData.mustChangePassword === true;
 }
 
+function normalizeLoginHistoryItems(rawHistory = []) {
+  if (!Array.isArray(rawHistory)) return [];
+
+  return rawHistory
+    .map((item) => {
+      if (!item) return "";
+      if (typeof item === "string") return item.trim();
+      if (item instanceof Date) return item.toISOString();
+      if (typeof item === "object") {
+        if (typeof item.atIso === "string" && item.atIso.trim()) return item.atIso.trim();
+        if (typeof item.iso === "string" && item.iso.trim()) return item.iso.trim();
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .slice(0, 10)
+    .map((atIso) => ({ atIso }));
+}
+
 function getAdminConfigRef() {
   return db.collection(ADMIN_CONFIG_COLLECTION).doc(ADMIN_CONFIG_DOC);
 }
@@ -509,13 +528,23 @@ app.post("/auth/login", async (req, res) => {
     const claims = role === "master" ? { role, adminMaster: true, canUploadPhotos } : { role, canUploadPhotos };
     const customToken = await admin.auth().createCustomToken(uid, claims);
     const tokenPayload = await exchangeCustomTokenForIdToken(customToken);
+    const loginIso = new Date().toISOString();
+    await db.runTransaction(async (transaction) => {
+      const freshSnap = await transaction.get(userRef);
+      const freshData = freshSnap.exists ? freshSnap.data() || {} : {};
+      const currentHistory = normalizeLoginHistoryItems(freshData.loginHistory);
+      const nextHistory = [{ atIso: loginIso }, ...currentHistory].slice(0, 10);
 
-    await userRef.set(
-      {
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+      transaction.set(
+        userRef,
+        {
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastLoginAtIso: loginIso,
+          loginHistory: nextHistory,
+        },
+        { merge: true }
+      );
+    });
 
     return res.json({
       ok: true,
@@ -542,6 +571,7 @@ app.get("/admin/users", requireAdmin, async (_req, res) => {
     const snap = await db.collection("users").orderBy("phone").get();
     const users = snap.docs.map((doc) => {
       const data = doc.data() || {};
+      const loginHistory = normalizeLoginHistoryItems(data.loginHistory);
       return {
         uid: doc.id,
         phone: data.phone || doc.id,
@@ -551,6 +581,8 @@ app.get("/admin/users", requireAdmin, async (_req, res) => {
         editScope: resolveEditScope(data),
         mustChangePassword: resolveMustChangePassword(data),
         canUploadPhotos: resolveCanUploadPhotos(data),
+        lastLoginAtIso: data.lastLoginAtIso || "",
+        loginHistory,
       };
     }).filter((user) => (_req.adminAccess === "master" ? true : user.role !== "master"));
 
@@ -627,6 +659,8 @@ app.patch("/admin/signup-requests/:uid", requireAdmin, async (req, res) => {
           editScope: "all",
           mustChangePassword: false,
           active: true,
+          lastLoginAtIso: "",
+          loginHistory: [],
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
