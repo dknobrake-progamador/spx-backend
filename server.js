@@ -23,6 +23,7 @@ app.use(express.json({ limit: "80mb" }));
 const client = new vision.ImageAnnotatorClient();
 const FIREBASE_WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY;
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "spx-motorista-parceiro";
+const MASTER_LOGIN = "21978818116";
 const ADMIN_CONFIG_COLLECTION = "system";
 const ADMIN_CONFIG_DOC = "admin-control";
 const SIGNUP_REQUESTS_COLLECTION = "signupRequests";
@@ -42,8 +43,21 @@ function normalizePhoneDigits(raw = "") {
   return String(raw).replace(/\D/g, "");
 }
 
+function normalizeToLocalBrPhone(raw = "") {
+  const digits = normalizePhoneDigits(raw);
+  if (digits.startsWith("55") && digits.length === 13) {
+    return digits.slice(2);
+  }
+  return digits;
+}
+
 function resolveRole(userData = {}, uid = "") {
-  if (userData.role === "master") return "master";
+  if (
+    normalizeToLocalBrPhone(uid) === MASTER_LOGIN ||
+    normalizeToLocalBrPhone(userData.phone || "") === MASTER_LOGIN
+  ) {
+    return "master";
+  }
   if (userData.role === "admin2") return "admin2";
   return "user";
 }
