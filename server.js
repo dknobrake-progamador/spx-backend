@@ -803,6 +803,9 @@ app.patch("/admin/users/:uid", requireAdmin, async (req, res) => {
     }
 
     if (typeof req.body?.editScope === "string") {
+      if (req.adminAccess !== "master" && String(req.body.editScope).trim().toLowerCase() === "all") {
+        return res.status(403).json({ error: "Acesso indisponivel." });
+      }
       const editScope = resolveEditScope({ editScope: req.body.editScope });
       updates.editScope = editScope;
       updates.editMode = editScope !== "none";
@@ -844,6 +847,55 @@ app.patch("/admin/users/:uid", requireAdmin, async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: "Falha ao atualizar usuario", details: String(error.message || error) });
+  }
+});
+
+app.post("/admin/users/:uid/clear-screens", requireAdmin, async (req, res) => {
+  try {
+    const uid = String(req.params.uid || "").trim();
+    if (!uid) {
+      return res.status(400).json({ error: "Usuario invalido." });
+    }
+
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: "Usuario nao encontrado." });
+    }
+    const currentData = userSnap.data() || {};
+    if (!ensureCanManageTarget(req, res, uid, currentData)) {
+      return;
+    }
+
+    const photoRef = db.collection("photos").doc(uid);
+    const photoSnap = await photoRef.get();
+    const photoData = photoSnap.exists ? photoSnap.data() || {} : {};
+
+    if (photoSnap.exists) {
+      await deletePhotoFiles(photoData);
+      await photoRef.delete();
+    }
+
+    await userRef.set(
+      {
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    await writeAdminAudit(req.user?.uid, "clear_screens", uid, {
+      phone: currentData.phone || uid,
+      hadPhotos: photoSnap.exists,
+    });
+
+    return res.json({
+      ok: true,
+      uid,
+      cleared: true,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao excluir telas", details: String(error.message || error) });
   }
 });
 
