@@ -669,13 +669,18 @@ export default function PainelAdmin() {
             </View>
 
             <View style={styles.signupRequestsBlock}>
-              <Text style={styles.signupRequestsTitle}>Solicitacoes de cadastro</Text>
+              <Text style={styles.signupRequestsTitle}>
+                Solicitacoes de cadastro ({pendingSignupRequests.length})
+              </Text>
               {pendingSignupRequests.length === 0 ? (
                 <Text style={styles.signupEmptyText}>Nenhuma solicitacao pendente.</Text>
               ) : null}
 
               {pendingSignupRequests.map((item) => (
                   <View key={item.uid} style={styles.signupCard}>
+                    <View style={styles.signupPendingBadge}>
+                      <Text style={styles.signupPendingBadgeText}>PENDENTE</Text>
+                    </View>
                     <Text style={styles.signupPhone}>{item.phone}</Text>
                     <Text style={styles.signupMeta}>
                       Solicitado em {formatAuditDate(item.requestedAtIso || item.updatedAtIso)}
@@ -1367,15 +1372,31 @@ const styles = StyleSheet.create({
   signupCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    backgroundColor: "#0b0b0b",
+    borderColor: "#facc15",
+    backgroundColor: "#2b2305",
     padding: 12,
     gap: 8,
   },
+  signupPendingBadge: {
+    alignSelf: "flex-start",
+    minHeight: 26,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#facc15",
+  },
+  signupPendingBadgeText: {
+    color: "#09090b",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
   signupPhone: {
-    color: "#facc15",
-    fontSize: 15,
-    fontWeight: "800",
+    color: "#fef08a",
+    fontSize: 16,
+    fontWeight: "900",
   },
   signupMeta: {
     color: "#a1a1aa",

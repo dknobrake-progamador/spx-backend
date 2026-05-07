@@ -283,12 +283,17 @@ export default function PainelAdm() {
             </View>
 
             <View style={styles.controlCardStack}>
-              <Text style={styles.controlTitle}>Solicitacoes de cadastro</Text>
+              <Text style={styles.controlTitle}>
+                Solicitacoes de cadastro ({pendingSignupRequests.length})
+              </Text>
               {pendingSignupRequests.length === 0 ? (
                 <Text style={styles.controlHelper}>Nenhuma solicitacao pendente.</Text>
               ) : (
                 pendingSignupRequests.map((item) => (
                     <View key={item.uid} style={styles.requestCard}>
+                      <View style={styles.requestPendingBadge}>
+                        <Text style={styles.requestPendingBadgeText}>PENDENTE</Text>
+                      </View>
                       <Text style={styles.requestPhone}>{item.phone}</Text>
                       <Text style={styles.requestMeta}>
                         {new Date(item.requestedAtIso).toLocaleString("pt-BR")}
@@ -514,16 +519,33 @@ const styles = StyleSheet.create({
   requestCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#2a5f84",
-    backgroundColor: "#0b1b29",
+    borderColor: "#facc15",
+    backgroundColor: "#2a240b",
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 4,
   },
+  requestPendingBadge: {
+    alignSelf: "flex-start",
+    minHeight: 24,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#facc15",
+    marginBottom: 2,
+  },
+  requestPendingBadgeText: {
+    color: "#09090b",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
   requestPhone: {
-    color: "#7dd3fc",
-    fontSize: 15,
-    fontWeight: "800",
+    color: "#fef08a",
+    fontSize: 16,
+    fontWeight: "900",
   },
   requestMeta: {
     color: "#9fb3c8",
