@@ -23,7 +23,6 @@ app.use(express.json({ limit: "80mb" }));
 const client = new vision.ImageAnnotatorClient();
 const FIREBASE_WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY;
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "spx-motorista-parceiro";
-const MASTER_ADMIN_PHONES = new Set(["21978818116", "5521978818116"]);
 const ADMIN_CONFIG_COLLECTION = "system";
 const ADMIN_CONFIG_DOC = "admin-control";
 const SIGNUP_REQUESTS_COLLECTION = "signupRequests";
@@ -43,12 +42,8 @@ function normalizePhoneDigits(raw = "") {
   return String(raw).replace(/\D/g, "");
 }
 
-function isMasterPhone(raw = "") {
-  return MASTER_ADMIN_PHONES.has(normalizePhoneDigits(raw));
-}
-
 function resolveRole(userData = {}, uid = "") {
-  if (isMasterPhone(uid) || isMasterPhone(userData.phone || "")) return "master";
+  if (userData.role === "master") return "master";
   if (userData.role === "admin2") return "admin2";
   return "user";
 }
@@ -198,11 +193,6 @@ async function requireAdmin(req, res, next) {
     });
 
     const uid = req.user?.uid || "";
-    if (isMasterPhone(uid)) {
-      req.adminAccess = "master";
-      return next();
-    }
-
     const adminSnap = await db.collection("users").doc(uid).get();
     const adminData = adminSnap.exists ? adminSnap.data() || {} : {};
     const resolvedRole = resolveRole(adminData, uid);
@@ -612,7 +602,7 @@ app.get("/admin/signup-requests", requireAdmin, async (req, res) => {
           updatedAtIso: data.updatedAtIso || "",
         };
       })
-      .filter((item) => (req.adminAccess === "master" ? true : !isMasterPhone(item.uid)));
+      .filter((item) => (req.adminAccess === "master" ? true : String(item.role || "").trim().toLowerCase() !== "master"));
 
     return res.json({ ok: true, requests });
   } catch (error) {
@@ -1095,7 +1085,13 @@ app.get("/admin/audit", requireMaster, async (_req, res) => {
         details: data.details || {},
         createdAtIso: data.createdAtIso || "",
       };
-    }).filter((item) => (_req.adminAccess === "master" ? true : !isMasterPhone(item.targetUid) && !isMasterPhone(item.actorUid)));
+    }).filter((item) => {
+      if (_req.adminAccess === "master") return true;
+      const details = item.details || {};
+      const targetRole = String(details.targetRole || "").trim().toLowerCase();
+      const actorRole = String(details.actorRole || "").trim().toLowerCase();
+      return targetRole !== "master" && actorRole !== "master";
+    });
 
     return res.json({ ok: true, items });
   } catch (error) {
