@@ -24,6 +24,9 @@ const client = new vision.ImageAnnotatorClient();
 const FIREBASE_WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY;
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "spx-motorista-parceiro";
 const MASTER_ADMIN_PHONES = new Set(["21978818116", "5521978818116"]);
+const ADMIN_CONFIG_COLLECTION = "system";
+const ADMIN_CONFIG_DOC = "admin-control";
+const SIGNUP_REQUESTS_COLLECTION = "signupRequests";
 
 function normalizePhoneBR(raw = "") {
   const digits = String(raw).replace(/\D/g, "");
@@ -71,6 +74,34 @@ function resolveEditScope(userData = {}) {
 
 function resolveMustChangePassword(userData = {}) {
   return userData.mustChangePassword === true;
+}
+
+function getAdminConfigRef() {
+  return db.collection(ADMIN_CONFIG_COLLECTION).doc(ADMIN_CONFIG_DOC);
+}
+
+function getSignupRequestRef(uid) {
+  return db.collection(SIGNUP_REQUESTS_COLLECTION).doc(uid);
+}
+
+function resolveRegistrationEnabled(configData = {}) {
+  return configData.registrationEnabled !== false;
+}
+
+async function readAdminConfig() {
+  const snap = await getAdminConfigRef().get();
+  return snap.exists ? snap.data() || {} : {};
+}
+
+async function applyUserClaims(uid, userData = {}) {
+  const role = resolveRole(userData, uid);
+  const canUploadPhotos = resolveCanUploadPhotos(userData);
+  const claims =
+    role === "master"
+      ? { role, adminMaster: true, canUploadPhotos }
+      : { role, canUploadPhotos };
+  await admin.auth().setCustomUserClaims(uid, claims);
+  return claims;
 }
 
 function generateTemporaryPassword(length = 8) {
@@ -153,24 +184,15 @@ async function requireAdmin(req, res, next) {
       return next();
     }
 
-    if (req.user?.role === "master" || req.user?.adminMaster === true) {
-      req.adminAccess = "master";
-      return next();
-    }
-
-    if (req.user?.role === "admin2") {
-      req.adminAccess = "admin2";
-      return next();
-    }
-
     const adminSnap = await db.collection("users").doc(uid).get();
     const adminData = adminSnap.exists ? adminSnap.data() || {} : {};
-    if (resolveRole(adminData, uid) === "master") {
+    const resolvedRole = resolveRole(adminData, uid);
+    if (resolvedRole === "master") {
       req.adminAccess = "master";
       return next();
     }
 
-    if (resolveRole(adminData, uid) === "admin2") {
+    if (resolvedRole === "admin2") {
       req.adminAccess = "admin2";
       return next();
     }
@@ -179,6 +201,15 @@ async function requireAdmin(req, res, next) {
   } catch (error) {
     return res.status(401).json({ error: "Sessao invalida.", details: String(error.message || error) });
   }
+}
+
+async function requireMaster(req, res, next) {
+  return requireAdmin(req, res, () => {
+    if (req.adminAccess !== "master") {
+      return res.status(403).json({ error: "Acesso indisponivel." });
+    }
+    return next();
+  });
 }
 
 function ensureCanManageTarget(req, res, targetUid, targetData = {}) {
@@ -354,6 +385,11 @@ app.post("/auth/register", async (req, res) => {
   try {
     const phone = normalizePhoneBR(req.body?.phone || "");
     const password = String(req.body?.password || "").trim();
+    const adminConfig = await readAdminConfig();
+
+    if (!resolveRegistrationEnabled(adminConfig)) {
+      return res.status(403).json({ error: "Cadastro indisponivel no momento." });
+    }
 
     if (!phone || phone.length < 12) {
       return res.status(400).json({ error: "Telefone invalido." });
@@ -370,36 +406,34 @@ app.post("/auth/register", async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
+    const requestRef = getSignupRequestRef(uid);
+    const requestSnap = await requestRef.get();
+    const currentStatus = requestSnap.exists ? String(requestSnap.data()?.status || "") : "";
 
-    const role = "user";
-    const canUploadPhotos = resolveCanUploadPhotos({ role });
+    if (currentStatus === "pending") {
+      return res.status(409).json({ error: "Ja existe uma solicitacao pendente para este telefone." });
+    }
 
-    await userRef.set({
-      phone,
-      passwordHash,
-      role,
-      canUploadPhotos,
-      editMode: false,
-      editScope: "none",
-      mustChangePassword: false,
-      active: true,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    const customToken = await admin.auth().createCustomToken(uid, { role, canUploadPhotos });
-    const tokenPayload = await exchangeCustomTokenForIdToken(customToken);
+    await requestRef.set(
+      {
+        uid,
+        phone,
+        passwordHash,
+        status: "pending",
+        requestedAtIso: new Date().toISOString(),
+        requestedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAtIso: new Date().toISOString(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 
     return res.json({
       ok: true,
+      pendingApproval: true,
       uid,
       phone,
-      role,
-      canUploadPhotos,
-      customToken,
-      idToken: tokenPayload.idToken,
-      refreshToken: tokenPayload.refreshToken,
-      expiresIn: tokenPayload.expiresIn,
+      message: "Solicitacao enviada. Aguarde aprovacao do administrador.",
     });
   } catch (error) {
     console.error(error);
@@ -424,6 +458,20 @@ app.post("/auth/login", async (req, res) => {
     const snap = await userRef.get();
 
     if (!snap.exists) {
+      const requestSnap = await getSignupRequestRef(uid).get();
+      if (requestSnap.exists) {
+        const requestData = requestSnap.data() || {};
+        const requestStatus = String(requestData.status || "pending");
+        if (requestStatus === "pending") {
+          return res.status(403).json({ error: "Cadastro em analise pelo administrador." });
+        }
+        if (requestStatus === "blocked") {
+          return res.status(403).json({ error: "Cadastro bloqueado pelo administrador." });
+        }
+        if (requestStatus === "deleted") {
+          return res.status(403).json({ error: "Solicitacao removida pelo administrador." });
+        }
+      }
       return res.status(404).json({ error: "Telefone nao cadastrado." });
     }
 
@@ -495,6 +543,176 @@ app.get("/admin/users", requireAdmin, async (_req, res) => {
   }
 });
 
+app.get("/admin/signup-requests", requireAdmin, async (req, res) => {
+  try {
+    const snap = await db
+      .collection(SIGNUP_REQUESTS_COLLECTION)
+      .orderBy("requestedAt", "desc")
+      .limit(200)
+      .get();
+
+    const requests = snap.docs
+      .map((doc) => {
+        const data = doc.data() || {};
+        return {
+          uid: doc.id,
+          phone: data.phone || doc.id,
+          status: String(data.status || "pending"),
+          requestedAtIso: data.requestedAtIso || "",
+          updatedAtIso: data.updatedAtIso || "",
+        };
+      })
+      .filter((item) => (req.adminAccess === "master" ? true : !isMasterPhone(item.uid)));
+
+    return res.json({ ok: true, requests });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao listar solicitacoes de cadastro",
+      details: String(error.message || error),
+    });
+  }
+});
+
+app.patch("/admin/signup-requests/:uid", requireAdmin, async (req, res) => {
+  try {
+    const uid = String(req.params.uid || "").trim();
+    const action = String(req.body?.action || "").trim().toLowerCase();
+    if (!uid) return res.status(400).json({ error: "Solicitacao invalida." });
+    if (!["approve", "block", "delete"].includes(action)) {
+      return res.status(400).json({ error: "Acao invalida." });
+    }
+
+    const requestRef = getSignupRequestRef(uid);
+    const requestSnap = await requestRef.get();
+    if (!requestSnap.exists) {
+      return res.status(404).json({ error: "Solicitacao nao encontrada." });
+    }
+
+    const requestData = requestSnap.data() || {};
+    if (!ensureCanManageTarget(req, res, uid, { phone: requestData.phone })) {
+      return;
+    }
+
+    if (action === "approve") {
+      const userRef = db.collection("users").doc(uid);
+      const existingUserSnap = await userRef.get();
+      if (!existingUserSnap.exists) {
+        const role = "user";
+        const canUploadPhotos = resolveCanUploadPhotos({ role });
+        await userRef.set({
+          phone: requestData.phone || uid,
+          passwordHash: requestData.passwordHash || "",
+          role,
+          canUploadPhotos,
+          editMode: true,
+          editScope: "all",
+          mustChangePassword: false,
+          active: true,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        await applyUserClaims(uid, { role, canUploadPhotos, phone: requestData.phone || uid, uid });
+      } else {
+        await userRef.set(
+          {
+            active: true,
+            editMode: true,
+            editScope: "all",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    }
+
+    const nextStatus = action === "approve" ? "approved" : action === "block" ? "blocked" : "deleted";
+    await requestRef.set(
+      {
+        status: nextStatus,
+        reviewedByUid: req.user?.uid || "",
+        updatedAtIso: new Date().toISOString(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    await writeAdminAudit(req.user?.uid, "update_signup_request", uid, {
+      action: nextStatus,
+      phone: requestData.phone || uid,
+    });
+
+    return res.json({
+      ok: true,
+      request: {
+        uid,
+        phone: requestData.phone || uid,
+        status: nextStatus,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao atualizar solicitacao de cadastro",
+      details: String(error.message || error),
+    });
+  }
+});
+
+app.get("/admin/access", requireAdmin, async (req, res) => {
+  try {
+    const adminConfig = await readAdminConfig();
+    return res.json({
+      ok: true,
+      access: req.adminAccess === "master" ? "master" : "admin2",
+      registrationEnabled: resolveRegistrationEnabled(adminConfig),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao carregar acesso administrativo." });
+  }
+});
+
+app.get("/admin/config", requireAdmin, async (_req, res) => {
+  try {
+    const adminConfig = await readAdminConfig();
+    return res.json({
+      ok: true,
+      registrationEnabled: resolveRegistrationEnabled(adminConfig),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao carregar configuracoes administrativas." });
+  }
+});
+
+app.patch("/admin/config", requireAdmin, async (req, res) => {
+  try {
+    const updates = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (typeof req.body?.registrationEnabled === "boolean") {
+      updates.registrationEnabled = req.body.registrationEnabled;
+    }
+
+    await getAdminConfigRef().set(updates, { merge: true });
+    await writeAdminAudit(req.user?.uid, "update_admin_config", "admin-control", {
+      registrationEnabled:
+        typeof req.body?.registrationEnabled === "boolean" ? req.body.registrationEnabled : undefined,
+    });
+
+    const merged = await readAdminConfig();
+    return res.json({
+      ok: true,
+      registrationEnabled: resolveRegistrationEnabled(merged),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao atualizar configuracoes administrativas." });
+  }
+});
+
 app.patch("/admin/users/:uid", requireAdmin, async (req, res) => {
   try {
     const uid = String(req.params.uid || "").trim();
@@ -520,7 +738,11 @@ app.patch("/admin/users/:uid", requireAdmin, async (req, res) => {
     };
 
     if (typeof req.body?.active === "boolean") {
-      updates.active = req.body.active;
+      if (resolveRole(currentData, uid) === "master") {
+        updates.active = true;
+      } else {
+        updates.active = req.body.active;
+      }
     }
 
     if (typeof req.body?.editMode === "boolean") {
@@ -534,12 +756,24 @@ app.patch("/admin/users/:uid", requireAdmin, async (req, res) => {
       updates.editMode = editScope !== "none";
     }
 
+    if (req.adminAccess === "master" && typeof req.body?.role === "string") {
+      const nextRole = String(req.body.role).trim().toLowerCase() === "admin2" ? "admin2" : "user";
+      if (resolveRole(currentData, uid) !== "master") {
+        updates.role = nextRole;
+        updates.canUploadPhotos = resolveCanUploadPhotos({ ...currentData, ...updates, role: nextRole, uid });
+      }
+    }
+
     await userRef.set(updates, { merge: true });
     const merged = { ...currentData, ...req.body, ...updates };
+    if (typeof updates.role === "string") {
+      await applyUserClaims(uid, merged);
+    }
     await writeAdminAudit(req.user?.uid, "update_user", uid, {
       active: typeof req.body?.active === "boolean" ? req.body.active : undefined,
       editScope: typeof req.body?.editScope === "string" ? resolveEditScope({ editScope: req.body.editScope }) : undefined,
       editMode: typeof req.body?.editMode === "boolean" ? req.body.editMode : undefined,
+      role: typeof updates.role === "string" ? updates.role : undefined,
     });
 
     return res.json({
@@ -561,7 +795,7 @@ app.patch("/admin/users/:uid", requireAdmin, async (req, res) => {
   }
 });
 
-app.post("/admin/users/:uid/password", requireAdmin, async (req, res) => {
+app.post("/admin/users/:uid/password", requireMaster, async (req, res) => {
   try {
     const uid = String(req.params.uid || "").trim();
     if (!uid) {
@@ -616,7 +850,7 @@ app.post("/admin/users/:uid/password", requireAdmin, async (req, res) => {
   }
 });
 
-app.get("/admin/users/:uid/photos", requireAdmin, async (req, res) => {
+app.get("/admin/users/:uid/photos", requireMaster, async (req, res) => {
   try {
     const uid = String(req.params.uid || "").trim();
     if (!uid) {
@@ -672,7 +906,7 @@ app.get("/admin/users/:uid/photos", requireAdmin, async (req, res) => {
   }
 });
 
-app.get("/admin/audit", requireAdmin, async (_req, res) => {
+app.get("/admin/audit", requireMaster, async (_req, res) => {
   try {
     const snap = await db.collection("adminAudit").orderBy("createdAt", "desc").limit(50).get();
     const items = snap.docs.map((doc) => {
@@ -697,7 +931,7 @@ app.get("/admin/audit", requireAdmin, async (_req, res) => {
   }
 });
 
-app.delete("/admin/users/:uid", requireAdmin, async (req, res) => {
+app.delete("/admin/users/:uid", requireMaster, async (req, res) => {
   try {
     const uid = String(req.params.uid || "").trim();
     if (!uid) {
