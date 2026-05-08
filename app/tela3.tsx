@@ -218,7 +218,7 @@ export default function Tela3() {
           <Text style={styles.tabText}>Pendente ({dados.pendente})</Text>
         </Pressable>
 
-        <Pressable onLongPress={abrirEditorQuantidade} delayLongPress={5000} style={[styles.tab, styles.activeTab]}>
+        <Pressable onLongPress={abrirEditorQuantidade} delayLongPress={3000} style={[styles.tab, styles.activeTab]}>
           <Text style={styles.activeTabText}>Ocorrencia ({ocorrencias.length})</Text>
           <View style={styles.activeUnderline} />
         </Pressable>
