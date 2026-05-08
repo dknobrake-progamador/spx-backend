@@ -163,7 +163,8 @@ export default function Tela3() {
     setQuantidadeOcorrencias(persisted);
     setModalQuantidadeVisivel(false);
     if (persisted === 0) {
-      router.replace("/tela3");
+      await setTela3PrimaryScreen("tela30");
+      router.replace("/tela3-imagem");
     }
   }
 
