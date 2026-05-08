@@ -1459,6 +1459,27 @@ function parseFields(rawText) {
   };
 }
 
+function splitCardsFromText(rawText, maxCards = 5) {
+  const text = String(rawText || "").replace(/\r/g, "");
+  const lines = text.split("\n").map((line) => normalizeSpaces(line)).filter(Boolean);
+  if (!lines.length) return [];
+
+  const groups = [];
+  let current = [];
+
+  for (const line of lines) {
+    if (/\bBR\d{6,}[A-Z]?\b/i.test(line) && current.length) {
+      groups.push(current.join("\n"));
+      current = [line];
+    } else {
+      current.push(line);
+    }
+  }
+
+  if (current.length) groups.push(current.join("\n"));
+  return groups.slice(0, Math.max(1, Number(maxCards) || 5));
+}
+
 app.post("/ocr", async (req, res) => {
   try {
     const { imageBase64, mimeType } = req.body || {};
@@ -1489,6 +1510,48 @@ app.post("/ocr", async (req, res) => {
     console.error(error);
     return res.status(500).json({
       error: "Falha no OCR",
+      details: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post("/ocr/cards", async (req, res) => {
+  try {
+    const { imageBase64, mimeType, maxCards } = req.body || {};
+
+    if (!imageBase64) {
+      return res.status(400).json({ error: "imageBase64 nao enviado." });
+    }
+
+    const cleanBase64 = String(imageBase64).replace(/^data:.*;base64,/, "");
+    const imageBuffer = Buffer.from(cleanBase64, "base64");
+
+    const [result] = await client.textDetection({
+      image: { content: imageBuffer },
+      imageContext: { languageHints: ["pt", "pt-BR"] },
+    });
+
+    const text =
+      result.fullTextAnnotation?.text || result.textAnnotations?.[0]?.description || "";
+
+    const cardTexts = splitCardsFromText(text, maxCards);
+    const cards = (cardTexts.length ? cardTexts : [text])
+      .filter((chunk) => String(chunk || "").trim().length > 0)
+      .map((chunk) => ({
+        text: chunk,
+        fields: parseFields(chunk),
+      }));
+
+    return res.json({
+      text,
+      mimeType: mimeType || "image/jpeg",
+      totalFound: cards.length,
+      cards,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha no OCR em lote",
       details: error instanceof Error ? error.message : String(error),
     });
   }
