@@ -173,8 +173,7 @@ export default function Tela8() {
 
       {/* Centro: lanterna */}
       <Pressable
-        onLongPress={alternarLanterna}
-        delayLongPress={4000}
+        onPress={alternarLanterna}
         style={styles.flashArea}
       >
         <MaterialCommunityIcons name="flashlight" size={26} color="#fff" />
