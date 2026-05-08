@@ -15,10 +15,12 @@ export default function Tela8() {
   const [scanned, setScanned] = useState(false);
   const [scannerNativoDisponivel, setScannerNativoDisponivel] = useState(false);
   const [torchEnabled, setTorchEnabled] = useState(false);
+  const [showSecondReadModal, setShowSecondReadModal] = useState(false);
   const scanY = useRef(new Animated.Value(0)).current;
   const beepSoundRef = useRef<Audio.Sound | null>(null);
   const scanLockRef = useRef(false);
   const lastScanRef = useRef("");
+  const successfulReadCountRef = useRef(0);
 
   useEffect(() => {
     if (!permission) return;
@@ -95,6 +97,10 @@ export default function Tela8() {
     if (scanned || scanLockRef.current || !normalizedData) {
       return;
     }
+    if (successfulReadCountRef.current >= 1) {
+      setShowSecondReadModal(true);
+      return;
+    }
     scanLockRef.current = true;
     if (lastScanRef.current === normalizedData) {
       setTimeout(() => {
@@ -136,6 +142,7 @@ export default function Tela8() {
       raw: normalizedData,
       scanType: type,
     });
+    successfulReadCountRef.current += 1;
 
     Alert.alert(
       parsedScan.codigo,
@@ -211,6 +218,42 @@ export default function Tela8() {
           Aponte para um QR com BR, nome e endereco. Texto puro na camera nao e suportado aqui.
         </Text>
       </View>
+
+      {showSecondReadModal ? (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Nao reconhecido</Text>
+            <Text style={styles.modalMessage}>Esta tarefa foi atribuida para outro motorista</Text>
+            <View style={styles.modalDivider} />
+            <View style={styles.modalActions}>
+              <Pressable
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowSecondReadModal(false);
+                  setScanned(false);
+                  scanLockRef.current = false;
+                }}
+              >
+                <MaterialIcons name="close" size={24} color="#9aa3ad" />
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </Pressable>
+              <View style={styles.modalVerticalDivider} />
+              <Pressable
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowSecondReadModal(false);
+                  setScanned(false);
+                  scanLockRef.current = false;
+                  lastScanRef.current = "";
+                }}
+              >
+                <MaterialIcons name="refresh" size={22} color="#d96a3a" />
+                <Text style={styles.modalRepeatText}>Repetir</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -285,6 +328,81 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
     lineHeight: 20,
+  },
+
+  modalOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+
+  modalCard: {
+    width: "100%",
+    maxWidth: 520,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    paddingTop: 20,
+    paddingHorizontal: 18,
+    paddingBottom: 14,
+  },
+
+  modalTitle: {
+    fontSize: 22,
+    color: "#121212",
+    fontWeight: "500",
+    marginBottom: 10,
+  },
+
+  modalMessage: {
+    fontSize: 18,
+    color: "#8d98a4",
+    lineHeight: 24,
+    marginBottom: 16,
+  },
+
+  modalDivider: {
+    height: 1,
+    backgroundColor: "#e6e8ec",
+  },
+
+  modalActions: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  modalButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 8,
+  },
+
+  modalVerticalDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: "#eceef2",
+  },
+
+  modalCancelText: {
+    color: "#9aa3ad",
+    fontSize: 18,
+    fontWeight: "400",
+  },
+
+  modalRepeatText: {
+    color: "#d96a3a",
+    fontSize: 18,
+    fontWeight: "500",
   },
 
 });
