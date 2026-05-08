@@ -82,7 +82,7 @@ export default function Tela3Imagem() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} {...swipeLinePanResponder.panHandlers}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -194,10 +194,7 @@ export default function Tela3Imagem() {
             style={styles.centerButton}
           />
 
-          <View
-            {...swipeLinePanResponder.panHandlers}
-            style={styles.centerBlueButton}
-          >
+          <View style={styles.centerBlueButton}>
             <Pressable
               onLongPress={abrirTela3ComQuantidade}
               delayLongPress={3000}
