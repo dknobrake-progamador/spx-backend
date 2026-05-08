@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
 
   centerBlueButton: {
     position: "absolute",
-    top: "72%",
+    top: "42%",
     left: "50%",
     transform: [{ translateX: -28 }, { translateY: -28 }],
     width: 56,
