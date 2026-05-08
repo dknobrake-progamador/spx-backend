@@ -1,7 +1,17 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { Redirect, router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
-import { Dimensions, Image, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, View } from "react-native";
+import {
+  Dimensions,
+  Image,
+  PanResponder,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import { RefreshAnimado, useRefreshAnimado } from "../components/refresh animado";
 import {
   getTela3PrimaryScreen,
@@ -47,6 +57,21 @@ export default function Tela3Imagem() {
     await setTela3PrimaryScreen("tela3");
     router.replace("/tela3?editCount=1");
   }
+
+  const swipeLinePanResponder = PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 14,
+    onPanResponderRelease: async (_, gestureState) => {
+      const threshold = 50;
+      if (gestureState.dx >= threshold) {
+        router.push("/tela9");
+        return;
+      }
+      if (gestureState.dx <= -threshold) {
+        router.push("/tela6");
+      }
+    },
+  });
 
   if (!telaPrincipal) {
     return <SafeAreaView style={styles.container} />;
@@ -169,11 +194,16 @@ export default function Tela3Imagem() {
             style={styles.centerButton}
           />
 
-          <Pressable
-            onLongPress={abrirTela3ComQuantidade}
-            delayLongPress={3000}
+          <View
+            {...swipeLinePanResponder.panHandlers}
             style={styles.centerBlueButton}
-          />
+          >
+            <Pressable
+              onLongPress={abrirTela3ComQuantidade}
+              delayLongPress={3000}
+              style={styles.centerBlueButtonTouch}
+            />
+          </View>
         </View>
       </ScrollView>
 
@@ -253,5 +283,9 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 10,
     backgroundColor: "transparent",
+  },
+
+  centerBlueButtonTouch: {
+    flex: 1,
   },
 });
