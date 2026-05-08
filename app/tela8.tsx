@@ -2,8 +2,8 @@ import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Audio } from "expo-av";
-import { router } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Animated, Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 import { extractOccurrenceFromText } from "../lib/occurrenceParser";
 import { getCurrentAdminAccess, setScannedBrCode, setScannedOccurrence } from "../lib/devStorage";
@@ -13,9 +13,12 @@ const { width, height } = Dimensions.get("window");
 export default function Tela8() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const [scannerNativoDisponivel, setScannerNativoDisponivel] = useState(false);
   const [torchEnabled, setTorchEnabled] = useState(false);
   const scanY = useRef(new Animated.Value(0)).current;
   const beepSoundRef = useRef<Audio.Sound | null>(null);
+  const scanLockRef = useRef(false);
+  const lastScanRef = useRef("");
 
   useEffect(() => {
     if (!permission) return;
@@ -67,13 +70,39 @@ export default function Tela8() {
     };
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = CameraView.onModernBarcodeScanned((event) => {
+        handleBarcodeScanned({
+          data: event.data,
+          type: event.type,
+        }).catch(() => undefined);
+      });
+
+      setScannerNativoDisponivel(true);
+
+      return () => {
+        subscription.remove();
+      };
+    }, [scanned])
+  );
+
   if (!permission) return <View />;
   if (!permission.granted) return <View style={{ flex: 1 }} />;
 
   async function handleBarcodeScanned({ data, type }: { data: string; type: string }) {
-    if (scanned) {
+    const normalizedData = String(data || "").trim();
+    if (scanned || scanLockRef.current || !normalizedData) {
       return;
     }
+    scanLockRef.current = true;
+    if (lastScanRef.current === normalizedData) {
+      setTimeout(() => {
+        scanLockRef.current = false;
+      }, 700);
+      return;
+    }
+    lastScanRef.current = normalizedData;
 
     setScanned(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
@@ -89,10 +118,13 @@ export default function Tela8() {
       }
     }
 
-    const parsedScan = extractOccurrenceFromText(data);
+    const parsedScan = extractOccurrenceFromText(normalizedData);
 
     if (!parsedScan.codigo) {
       setScanned(false);
+      setTimeout(() => {
+        scanLockRef.current = false;
+      }, 450);
       return;
     }
 
@@ -101,14 +133,22 @@ export default function Tela8() {
       codigo: parsedScan.codigo,
       endereco: parsedScan.endereco,
       pessoa: parsedScan.pessoa,
-      raw: data,
+      raw: normalizedData,
       scanType: type,
     });
 
     Alert.alert(
       parsedScan.codigo,
       "Nao foi possivel adicionar esse pacote",
-      [{ text: "OK", onPress: () => setScanned(false) }]
+      [{
+        text: "OK",
+        onPress: () => {
+          setScanned(false);
+          setTimeout(() => {
+            scanLockRef.current = false;
+          }, 250);
+        },
+      }]
     );
   }
 
