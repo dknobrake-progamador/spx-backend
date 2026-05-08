@@ -155,10 +155,10 @@ export default function Tela3() {
 
   async function salvarQuantidade() {
     const numero = Number.parseInt(quantidadeInput.trim(), 10);
-    if (!Number.isFinite(numero) || numero < 1) {
+    if (!Number.isFinite(numero) || numero < 0) {
       return;
     }
-    const limite = Math.min(numero, MAX_OCORRENCIAS);
+    const limite = Math.max(0, Math.min(numero, MAX_OCORRENCIAS));
     const persisted = await setTela3OccurrenceCount(limite);
     setQuantidadeOcorrencias(persisted);
     setModalQuantidadeVisivel(false);

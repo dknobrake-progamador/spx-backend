@@ -362,7 +362,9 @@ export async function getTela3CallLog() {
 }
 
 export async function setTela3OccurrenceCount(count: number) {
-  const normalized = Math.max(1, Math.min(15, Math.floor(Number(count) || 1)));
+  const parsedCount = Number(count);
+  const safeCount = Number.isFinite(parsedCount) ? parsedCount : 0;
+  const normalized = Math.max(0, Math.min(15, Math.floor(safeCount)));
   await AsyncStorage.setItem(KEY_TELA3_OCCURRENCE_COUNT, String(normalized));
 
   const idToken = await getAuthIdToken();
@@ -385,11 +387,13 @@ export async function setTela3OccurrenceCount(count: number) {
 export async function getTela3OccurrenceCount(defaultValue = 15) {
   const localRaw = await AsyncStorage.getItem(KEY_TELA3_OCCURRENCE_COUNT);
   const localValue = Number(localRaw);
-  const fallback = Math.max(1, Math.min(15, Math.floor(defaultValue || 15)));
+  const parsedDefault = Number(defaultValue);
+  const safeDefault = Number.isFinite(parsedDefault) ? parsedDefault : 15;
+  const fallback = Math.max(0, Math.min(15, Math.floor(safeDefault)));
 
   const idToken = await getAuthIdToken();
   if (!idToken) {
-    if (Number.isFinite(localValue) && localValue >= 1) return Math.min(15, Math.floor(localValue));
+    if (Number.isFinite(localValue) && localValue >= 0) return Math.min(15, Math.floor(localValue));
     return fallback;
   }
 
@@ -398,11 +402,13 @@ export async function getTela3OccurrenceCount(defaultValue = 15) {
       idToken,
       timeoutMs: 20000,
     });
-    const cloudValue = Math.max(1, Math.min(15, Math.floor(Number(data.occurrenceCount) || fallback)));
+    const parsedCloud = Number(data.occurrenceCount);
+    const safeCloud = Number.isFinite(parsedCloud) ? parsedCloud : fallback;
+    const cloudValue = Math.max(0, Math.min(15, Math.floor(safeCloud)));
     await AsyncStorage.setItem(KEY_TELA3_OCCURRENCE_COUNT, String(cloudValue));
     return cloudValue;
   } catch {
-    if (Number.isFinite(localValue) && localValue >= 1) return Math.min(15, Math.floor(localValue));
+    if (Number.isFinite(localValue) && localValue >= 0) return Math.min(15, Math.floor(localValue));
     return fallback;
   }
 }
