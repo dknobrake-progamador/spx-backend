@@ -6,6 +6,7 @@ const vision = require("@google-cloud/vision");
 const bcrypt = require("bcryptjs");
 const admin = require("firebase-admin");
 const fetch = require("node-fetch");
+const { extractOccurrencesFromText } = require("./occurrence-parser");
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -1473,7 +1474,7 @@ function parseFields(rawText) {
   };
 }
 
-function splitCardsFromText(rawText, maxCards = 5) {
+function splitCardsFromText(rawText, maxCards = 15) {
   const text = String(rawText || "").replace(/\r/g, "");
   const lines = text.split("\n").map((line) => normalizeSpaces(line)).filter(Boolean);
   if (!lines.length) return [];
@@ -1491,7 +1492,7 @@ function splitCardsFromText(rawText, maxCards = 5) {
   }
 
   if (current.length) groups.push(current.join("\n"));
-  return groups.slice(0, Math.max(1, Number(maxCards) || 5));
+  return groups.slice(0, Math.max(1, Number(maxCards) || 15));
 }
 
 app.post("/ocr", async (req, res) => {
@@ -1548,13 +1549,37 @@ app.post("/ocr/cards", async (req, res) => {
     const text =
       result.fullTextAnnotation?.text || result.textAnnotations?.[0]?.description || "";
 
-    const cardTexts = splitCardsFromText(text, maxCards);
-    const cards = (cardTexts.length ? cardTexts : [text])
+    const limit = Math.max(1, Number(maxCards) || 15);
+    const parsedOccurrences = extractOccurrencesFromText(text).slice(0, limit);
+
+    const cardsFromParsed = parsedOccurrences.map((item) => {
+      const chunkText = String(item.rawText || "").trim();
+      const fallbackFields = parseFields(chunkText);
+      return {
+        text: chunkText,
+        fields: {
+          ...fallbackFields,
+          trackingCode: item.codigo || fallbackFields.trackingCode || "",
+          address: item.endereco || fallbackFields.address || "",
+          recipientName: item.pessoa || fallbackFields.recipientName || "",
+          rawText: chunkText || fallbackFields.rawText || "",
+        },
+      };
+    });
+
+    const cardsFromSplit = splitCardsFromText(text, limit)
       .filter((chunk) => String(chunk || "").trim().length > 0)
       .map((chunk) => ({
         text: chunk,
         fields: parseFields(chunk),
       }));
+
+    const cards =
+      cardsFromParsed.length > 0
+        ? cardsFromParsed
+        : cardsFromSplit.length > 0
+          ? cardsFromSplit
+          : [{ text, fields: parseFields(text) }];
 
     return res.json({
       text,
