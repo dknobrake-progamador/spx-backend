@@ -1397,8 +1397,22 @@ function normalizeSpaces(str = "") {
 }
 
 function extractTrackingCode(text) {
-  const match = text.match(/\bBR\d{6,}[A-Z]?\b/i);
-  return match ? match[0].toUpperCase() : "";
+  const candidates = [
+    /\b(BR\d{6,}\s*[A-Z0-9]{0,6})\b/i,
+    /\b(BR\d{6,}[A-Z]?)\b/i,
+  ];
+
+  for (const pattern of candidates) {
+    const match = String(text || "").match(pattern);
+    if (match?.[1]) {
+      return match[1].replace(/\s+/g, " ").trim().toUpperCase();
+    }
+    if (match?.[0]) {
+      return match[0].replace(/\s+/g, " ").trim().toUpperCase();
+    }
+  }
+
+  return "";
 }
 
 function extractAddress(lines) {
@@ -1468,7 +1482,7 @@ function splitCardsFromText(rawText, maxCards = 5) {
   let current = [];
 
   for (const line of lines) {
-    if (/\bBR\d{6,}[A-Z]?\b/i.test(line) && current.length) {
+    if (/\bBR\d{6,}\s*[A-Z0-9]{0,6}\b/i.test(line) && current.length) {
       groups.push(current.join("\n"));
       current = [line];
     } else {
