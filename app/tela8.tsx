@@ -1,4 +1,4 @@
-import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
+import { MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Audio } from "expo-av";
@@ -176,12 +176,7 @@ export default function Tela8() {
         onLongPress={alternarLanterna}
         delayLongPress={4000}
         style={styles.flashArea}
-      >
-        <MaterialCommunityIcons name="flashlight" size={26} color="#fff" />
-        <Text style={styles.flashText}>
-          {torchEnabled ? "Desligar lanterna" : "Ligar lanterna"}
-        </Text>
-      </Pressable>
+      />
 
       {/* Textos de baixo */}
       <View style={styles.bottomTextArea}>
@@ -231,17 +226,10 @@ const styles = StyleSheet.create({
   flashArea: {
     position: "absolute",
     top: height * 0.55,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    gap: 6,
-    opacity: 0.95,
-  },
-
-  flashText: {
-    color: "#fff",
-    fontSize: 18, // ✅ parecido com o print
-    fontWeight: "300",
+    left: width * 0.2,
+    width: width * 0.6,
+    height: 80,
+    backgroundColor: "transparent",
   },
 
   bottomTextArea: {
