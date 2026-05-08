@@ -3,6 +3,7 @@ import React from "react";
 import {
   Dimensions,
   Image,
+  PanResponder,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -100,9 +101,20 @@ const sections = [
 
 export default function Tela9() {
   const refreshAnimado = useRefreshAnimado();
+  const swipePanResponder = PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) =>
+      Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 20 &&
+      Math.abs(gestureState.vx) > 0.12,
+    onPanResponderRelease: (_, gestureState) => {
+      if (gestureState.dx <= -50) {
+        router.push("/tela3-imagem");
+      }
+    },
+  });
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} {...swipePanResponder.panHandlers}>
       <Image
         source={require("../assets/images/tela9.png")}
         style={styles.headerImage}

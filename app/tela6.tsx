@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import {
   Dimensions,
   ImageBackground,
+  PanResponder,
   Pressable,
   StyleSheet,
   View,
@@ -13,6 +14,17 @@ const { width, height } = Dimensions.get("window");
 
 export default function Tela6() {
   const [uri, setUri] = useState<string | null>(null);
+  const swipePanResponder = PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) =>
+      Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 20 &&
+      Math.abs(gestureState.vx) > 0.12,
+    onPanResponderRelease: (_, gestureState) => {
+      if (gestureState.dx >= 50) {
+        router.push("/tela3-imagem");
+      }
+    },
+  });
 
   useEffect(() => {
     (async () => {
@@ -27,7 +39,7 @@ export default function Tela6() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1 }} {...swipePanResponder.panHandlers}>
       <ImageBackground
         source={{ uri }}
         style={styles.bg}

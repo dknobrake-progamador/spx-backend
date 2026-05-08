@@ -59,8 +59,10 @@ export default function Tela3Imagem() {
   }
 
   const swipeLinePanResponder = PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 14,
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) =>
+      Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 20 &&
+      Math.abs(gestureState.vx) > 0.12,
     onPanResponderRelease: async (_, gestureState) => {
       const threshold = 50;
       if (gestureState.dx >= threshold) {
