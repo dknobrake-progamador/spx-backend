@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { WebView } from "react-native-webview";
 import {
+  getAllScannedOccurrences,
   getLabelPhotoUri,
   getScannedOccurrence,
   setLabelPhotoUri,
@@ -21,7 +22,8 @@ import {
   setScannedOccurrence,
 } from "../lib/devStorage";
 import { hasGoogleOcrEndpoint, runGoogleOcr } from "../lib/googleOcr";
-import { extractOccurrenceFromText } from "../lib/occurrenceParser";
+import { runBatchOcr } from "../lib/ocrBatchApi";
+import { extractOccurrenceFromText, extractOccurrencesFromText } from "../lib/occurrenceParser";
 import { OCR_WEBVIEW_HTML } from "../lib/ocrWebViewHtml";
 
 const TOTAL_CARDS = 5;
@@ -33,6 +35,7 @@ export default function Tela13() {
   const [ocrImageUri, setOcrImageUri] = useState<string | null>(null);
   const [ocrProgress, setOcrProgress] = useState<number>(0);
   const [ocrVisible, setOcrVisible] = useState(false);
+  const [batchLoading, setBatchLoading] = useState(false);
   const cardIndex = Number(params.index ?? "0");
   const cardLabel = Number.isFinite(cardIndex) ? cardIndex + 1 : 1;
 
@@ -163,7 +166,7 @@ export default function Tela13() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       allowsEditing: false,
       base64: true,
       quality: 1,
@@ -171,6 +174,125 @@ export default function Tela13() {
 
     if (!result.canceled) {
       await saveAndProcess(result.assets[0]);
+    }
+  }
+
+  async function executarOcrLoteOculto() {
+    const granted = await pedirPermissaoGaleria();
+    if (!granted) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: false,
+      base64: true,
+      quality: 1,
+    });
+
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (!asset.base64) {
+      Alert.alert("Imagem invalida", "Nao foi possivel ler a imagem selecionada.");
+      return;
+    }
+
+    try {
+      setBatchLoading(true);
+      const payload = await runBatchOcr({
+        base64: asset.base64,
+        mimeType: asset.mimeType || "image/jpeg",
+        maxCards: TOTAL_CARDS - cardIndex,
+      });
+      console.log("OCR_BATCH_DEBUG", {
+        totalFound: payload.totalFound,
+        cards: payload.cards?.length || 0,
+        textSample: (payload.text || "").slice(0, 220),
+      });
+
+      const fallbackFromFullText = extractOccurrencesFromText(payload.text || "");
+      const batchItems =
+        payload.cards && payload.cards.length > 0
+          ? payload.cards.map((card) => ({
+              codigo: card.fields?.trackingCode?.trim() || extractOccurrenceFromText(card.text || "").codigo || "",
+              endereco: card.fields?.address?.trim() || extractOccurrenceFromText(card.text || "").endereco || null,
+              pessoa:
+                card.fields?.recipientName?.trim() || extractOccurrenceFromText(card.text || "").pessoa || null,
+              status: card.fields?.status?.trim() || null,
+              statusDate: card.fields?.statusDate?.trim() || null,
+              raw: card.fields?.rawText || card.text || "",
+            }))
+          : [];
+
+      const sourceItems =
+        batchItems.filter((item) => item.codigo || item.endereco || item.pessoa).length > 0
+          ? batchItems
+          : fallbackFromFullText.map((item) => ({
+              codigo: item.codigo || "",
+              endereco: item.endereco || null,
+              pessoa: item.pessoa || null,
+              status: null,
+              statusDate: null,
+              raw: payload.text || "",
+            }));
+
+      let preenchidos = 0;
+      for (let offset = 0; offset < sourceItems.length; offset += 1) {
+        const alvo = cardIndex + offset;
+        if (alvo >= TOTAL_CARDS) break;
+
+        const item = sourceItems[offset];
+        const atual = await getScannedOccurrence(alvo);
+        const codigoDetectado = item.codigo || "";
+        const codigo = codigoDetectado || atual?.codigo || `SEM-CODIGO-${alvo + 1}`;
+        const possuiDados = Boolean(
+          codigoDetectado ||
+          item.endereco ||
+          item.pessoa ||
+          item.raw
+        );
+        if (!possuiDados) continue;
+
+        const merged = {
+          codigo,
+          endereco: item.endereco || atual?.endereco || null,
+          pessoa: item.pessoa || atual?.pessoa || null,
+          status: item.status || atual?.status || null,
+          statusDate: item.statusDate || atual?.statusDate || null,
+          raw: item.raw || atual?.raw || "",
+          scanType: "ocr-batch",
+        };
+
+        await setScannedOccurrence(merged, alvo);
+        preenchidos += 1;
+      }
+
+      if (preenchidos > 0) {
+        const first = await getScannedOccurrence(cardIndex);
+        if (first?.codigo) await setScannedBrCode(first.codigo);
+      }
+      await getAllScannedOccurrences();
+
+      if (preenchidos === 0) {
+        const fallbackText = (payload.text || "").trim();
+        if (fallbackText) {
+          await processOcrText(fallbackText);
+          return;
+        }
+
+        Alert.alert(
+          "OCR em lote",
+          "Nao foi possivel identificar dados dos cards nesta imagem."
+        );
+        return;
+      }
+
+      Alert.alert("OCR em lote", `${preenchidos} card(s) preenchidos a partir do card ${cardLabel}.`, [
+        { text: "OK", onPress: () => router.push("/tela3") },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha no OCR em lote.";
+      Alert.alert("Erro no OCR em lote", message);
+    } finally {
+      setBatchLoading(false);
     }
   }
 
@@ -268,9 +390,24 @@ export default function Tela13() {
           Escolha a foto da etiqueta pela galeria para preencher este card com OCR.
         </Text>
 
-        <Pressable onPress={escolherDaGaleria} style={[styles.actionButton, styles.secondaryButton]}>
+        <Pressable
+          onPress={escolherDaGaleria}
+          style={[styles.actionButton, styles.secondaryButton]}
+          disabled={batchLoading}
+        >
           <MaterialIcons name="photo-library" size={20} color="#222" />
           <Text style={styles.secondaryButtonText}>Escolher da galeria</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={executarOcrLoteOculto}
+          style={[styles.actionButton, styles.batchButton]}
+          disabled={batchLoading}
+        >
+          <MaterialIcons name="document-scanner" size={20} color="#fff" />
+          <Text style={styles.batchButtonText}>
+            {batchLoading ? "Processando lote..." : "OCR em lote"}
+          </Text>
         </Pressable>
 
         <Pressable onPress={() => router.push("/tela3")} style={styles.linkButton}>
@@ -401,6 +538,16 @@ const styles = StyleSheet.create({
 
   secondaryButtonText: {
     color: "#222",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  batchButton: {
+    backgroundColor: "#0f766e",
+  },
+
+  batchButtonText: {
+    color: "#fff",
     fontSize: 16,
     fontWeight: "700",
   },
