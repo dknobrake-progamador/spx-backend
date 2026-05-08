@@ -173,9 +173,7 @@ export default function Tela3Imagem() {
             onLongPress={abrirTela3ComQuantidade}
             delayLongPress={3000}
             style={styles.centerBlueButton}
-          >
-            <MaterialIcons name="list-alt" size={20} color="#fff" />
-          </Pressable>
+          />
         </View>
       </ScrollView>
 
@@ -255,12 +253,5 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 10,
     backgroundColor: "transparent",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#0b2f8a",
-    shadowOpacity: 0.28,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
   },
 });
