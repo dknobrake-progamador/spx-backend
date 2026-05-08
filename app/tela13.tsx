@@ -26,7 +26,7 @@ import { runBatchOcr } from "../lib/ocrBatchApi";
 import { extractOccurrenceFromText, extractOccurrencesFromText } from "../lib/occurrenceParser";
 import { OCR_WEBVIEW_HTML } from "../lib/ocrWebViewHtml";
 
-const TOTAL_CARDS = 5;
+const TOTAL_CARDS = 15;
 
 export default function Tela13() {
   const params = useLocalSearchParams<{ index?: string }>();

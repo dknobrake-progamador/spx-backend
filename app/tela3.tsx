@@ -108,6 +108,17 @@ export default function Tela3() {
   const ocorrencias = Array.from({ length: quantidadeOcorrencias }, (_, index) => {
     if (ocorrenciasBase[index]) return ocorrenciasBase[index];
 
+    const capturada = ocorrenciasCapturadas[index];
+    if (capturada) {
+      return {
+        codigo: capturada.codigo || `SEM CODIGO ${index + 1}`,
+        endereco: capturada.endereco?.trim() || "Endereco da ocorrencia",
+        pessoa: capturada.pessoa?.trim() || "Pessoa nao informada",
+        status: capturada.status?.trim() || "Ocorrencia pendente",
+        data: capturada.statusDate?.trim() || "--",
+      };
+    }
+
     return {
       codigo: `SEM CODIGO ${index + 1}`,
       endereco: "Endereco da ocorrencia",
