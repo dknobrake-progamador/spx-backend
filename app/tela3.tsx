@@ -71,15 +71,25 @@ export default function Tela3() {
       async function carregarOcorrenciasCapturadas() {
         const principal = await getTela3PrimaryScreen();
         const ocorrenciasPorIndice = await getAllScannedOccurrences();
+        const ocorrenciasPorLeituraDireta = await Promise.all(
+          Array.from({ length: MAX_OCORRENCIAS }, (_, index) => getScannedOccurrence(index))
+        );
         const fallbackPrimeiroCard = await getScannedOccurrence();
         const quantidadeSalva = await getTela3OccurrenceCount(dados.ocorrencias.length);
+        const ocorrenciasMescladas = { ...ocorrenciasPorIndice } as Record<number, ScannedOccurrence>;
+        ocorrenciasPorLeituraDireta.forEach((item, index) => {
+          if (item?.codigo) {
+            ocorrenciasMescladas[index] = item;
+          }
+        });
+
         if (ativo) {
           setTelaPrincipal(principal);
           setQuantidadeOcorrencias(quantidadeSalva);
           setOcorrenciasCapturadas(
-            fallbackPrimeiroCard && !ocorrenciasPorIndice[0]
-              ? { 0: fallbackPrimeiroCard, ...ocorrenciasPorIndice }
-              : ocorrenciasPorIndice
+            fallbackPrimeiroCard && !ocorrenciasMescladas[0]
+              ? { 0: fallbackPrimeiroCard, ...ocorrenciasMescladas }
+              : ocorrenciasMescladas
           );
         }
       }
