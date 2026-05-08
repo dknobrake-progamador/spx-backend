@@ -162,6 +162,9 @@ export default function Tela3() {
     const persisted = await setTela3OccurrenceCount(limite);
     setQuantidadeOcorrencias(persisted);
     setModalQuantidadeVisivel(false);
+    if (persisted === 0) {
+      router.replace("/tela3");
+    }
   }
 
   if (!telaPrincipal) {
