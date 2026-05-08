@@ -382,10 +382,10 @@ export async function setTela3OccurrenceCount(count: number) {
   return normalized;
 }
 
-export async function getTela3OccurrenceCount(defaultValue = 5) {
+export async function getTela3OccurrenceCount(defaultValue = 15) {
   const localRaw = await AsyncStorage.getItem(KEY_TELA3_OCCURRENCE_COUNT);
   const localValue = Number(localRaw);
-  const fallback = Math.max(1, Math.min(15, Math.floor(defaultValue || 5)));
+  const fallback = Math.max(1, Math.min(15, Math.floor(defaultValue || 15)));
 
   const idToken = await getAuthIdToken();
   if (!idToken) {

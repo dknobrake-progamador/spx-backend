@@ -55,13 +55,14 @@ const dados = {
   ],
 } as const;
 const MAX_OCORRENCIAS = 15;
+const DEFAULT_OCCURRENCES = 15;
 
 export default function Tela3() {
   const [telaPrincipal, setTelaPrincipal] = useState<Tela3PrimaryScreen | null>(null);
   const [ocorrenciasCapturadas, setOcorrenciasCapturadas] = useState<Record<number, ScannedOccurrence>>({});
-  const [quantidadeOcorrencias, setQuantidadeOcorrencias] = useState<number>(dados.ocorrencias.length);
+  const [quantidadeOcorrencias, setQuantidadeOcorrencias] = useState<number>(DEFAULT_OCCURRENCES);
   const [modalQuantidadeVisivel, setModalQuantidadeVisivel] = useState(false);
-  const [quantidadeInput, setQuantidadeInput] = useState(String(dados.ocorrencias.length));
+  const [quantidadeInput, setQuantidadeInput] = useState(String(DEFAULT_OCCURRENCES));
   const refreshAnimado = useRefreshAnimado();
 
   useFocusEffect(
@@ -75,7 +76,7 @@ export default function Tela3() {
           Array.from({ length: MAX_OCORRENCIAS }, (_, index) => getScannedOccurrence(index))
         );
         const fallbackPrimeiroCard = await getScannedOccurrence();
-        const quantidadeSalva = await getTela3OccurrenceCount(dados.ocorrencias.length);
+        const quantidadeSalva = await getTela3OccurrenceCount(DEFAULT_OCCURRENCES);
         const ocorrenciasMescladas = { ...ocorrenciasPorIndice } as Record<number, ScannedOccurrence>;
         ocorrenciasPorLeituraDireta.forEach((item, index) => {
           if (item?.codigo) {
