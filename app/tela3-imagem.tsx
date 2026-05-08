@@ -43,6 +43,11 @@ export default function Tela3Imagem() {
     router.replace("/tela3");
   }
 
+  async function abrirTela3ComQuantidade() {
+    await setTela3PrimaryScreen("tela3");
+    router.replace("/tela3?editCount=1");
+  }
+
   if (!telaPrincipal) {
     return <SafeAreaView style={styles.container} />;
   }
@@ -164,7 +169,11 @@ export default function Tela3Imagem() {
             style={styles.centerButton}
           />
 
-          <Pressable onPress={() => router.push("/tela3")} style={styles.centerBlueButton}>
+          <Pressable
+            onLongPress={abrirTela3ComQuantidade}
+            delayLongPress={3000}
+            style={styles.centerBlueButton}
+          >
             <MaterialIcons name="list-alt" size={20} color="#fff" />
           </Pressable>
         </View>

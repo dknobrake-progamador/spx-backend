@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { Redirect, router, useFocusEffect } from "expo-router";
-import React, { useCallback, useState } from "react";
+import { Redirect, router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { RefreshAnimado, useRefreshAnimado } from "../components/refresh animado";
 import {
@@ -58,6 +58,7 @@ const MAX_OCORRENCIAS = 15;
 const DEFAULT_OCCURRENCES = 15;
 
 export default function Tela3() {
+  const params = useLocalSearchParams<{ editCount?: string }>();
   const [telaPrincipal, setTelaPrincipal] = useState<Tela3PrimaryScreen | null>(null);
   const [ocorrenciasCapturadas, setOcorrenciasCapturadas] = useState<Record<number, ScannedOccurrence>>({});
   const [quantidadeOcorrencias, setQuantidadeOcorrencias] = useState<number>(DEFAULT_OCCURRENCES);
@@ -152,6 +153,13 @@ export default function Tela3() {
     setQuantidadeInput(String(quantidadeOcorrencias));
     setModalQuantidadeVisivel(true);
   }
+
+  useEffect(() => {
+    if (params.editCount === "1") {
+      setQuantidadeInput(String(quantidadeOcorrencias));
+      setModalQuantidadeVisivel(true);
+    }
+  }, [params.editCount, quantidadeOcorrencias]);
 
   async function salvarQuantidade() {
     const numero = Number.parseInt(quantidadeInput.trim(), 10);
