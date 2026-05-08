@@ -163,6 +163,10 @@ export default function Tela3Imagem() {
             delayLongPress={2500}
             style={styles.centerButton}
           />
+
+          <Pressable onPress={() => router.push("/tela3")} style={styles.centerBlueButton}>
+            <MaterialIcons name="list-alt" size={20} color="#fff" />
+          </Pressable>
         </View>
       </ScrollView>
 
@@ -231,5 +235,23 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  centerBlueButton: {
+    position: "absolute",
+    top: "60%",
+    left: "50%",
+    transform: [{ translateX: -28 }, { translateY: -28 }],
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#1d4ed8",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#0b2f8a",
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
 });
