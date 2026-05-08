@@ -32,7 +32,7 @@ export default function Tela2() {
             progressBackgroundColor="transparent"
             tintColor="transparent"
             titleColor="transparent"
-            progressViewOffset={-1000}
+            progressViewOffset={0}
           />
         }
       >
