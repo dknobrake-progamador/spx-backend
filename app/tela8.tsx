@@ -2,8 +2,8 @@ import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Audio } from "expo-av";
-import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { router } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import { Alert, Animated, Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 import { extractOccurrenceFromText } from "../lib/occurrenceParser";
 import { getCurrentAdminAccess, setScannedBrCode, setScannedOccurrence } from "../lib/devStorage";
@@ -13,7 +13,6 @@ const { width, height } = Dimensions.get("window");
 export default function Tela8() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
-  const [scannerNativoDisponivel, setScannerNativoDisponivel] = useState(false);
   const [torchEnabled, setTorchEnabled] = useState(false);
   const scanY = useRef(new Animated.Value(0)).current;
   const beepSoundRef = useRef<Audio.Sound | null>(null);
@@ -67,23 +66,6 @@ export default function Tela8() {
       currentSound?.unloadAsync().catch(() => undefined);
     };
   }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      const subscription = CameraView.onModernBarcodeScanned((event) => {
-        handleBarcodeScanned({
-          data: event.data,
-          type: event.type,
-        }).catch(() => undefined);
-      });
-
-      setScannerNativoDisponivel(true);
-
-      return () => {
-        subscription.remove();
-      };
-    }, [scanned])
-  );
 
   if (!permission) return <View />;
   if (!permission.granted) return <View style={{ flex: 1 }} />;
