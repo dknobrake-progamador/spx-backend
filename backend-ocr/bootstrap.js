@@ -75,11 +75,33 @@ function ensureGoogleCredentialsFile() {
 }
 
 function writeRuntimeCredentialsFile(credentialsJson) {
-  const parsed = JSON.parse(credentialsJson);
+  let parsed;
+
+  try {
+    parsed = JSON.parse(credentialsJson);
+  } catch (error) {
+    console.error("[BOOTSTRAP] Google credentials JSON invalido", {
+      length: String(credentialsJson || "").length,
+      startsWithJson: String(credentialsJson || "").trim().startsWith("{"),
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw new Error(
+      "Credencial Google invalida. Configure GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 ou GOOGLE_CREDENTIALS_BASE64 com o JSON completo em base64."
+    );
+  }
+
+  if (!parsed?.client_email || !parsed?.private_key || !parsed?.project_id) {
+    throw new Error(
+      "Credencial Google incompleta. O JSON precisa conter project_id, client_email e private_key."
+    );
+  }
+
   const credentialsPath = path.join(__dirname, ".runtime-google-credentials.json");
 
   fs.writeFileSync(credentialsPath, JSON.stringify(parsed, null, 2));
   process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialsPath;
+  process.env.GOOGLE_CREDENTIALS_READY = "1";
+  process.env.GOOGLE_CREDENTIALS_PROJECT_ID = String(parsed.project_id || "");
 }
 
 ensureGoogleCredentialsFile();
