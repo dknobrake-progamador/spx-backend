@@ -1,0 +1,78 @@
+CADASTRO ANTIGO - METODO COMPLETO PARA POSSIVEL RETORNO
+Projeto: D:\apk-shopee APK 01.06.2026
+Data do registro: 2026-06-13
+
+OBJETIVO DESTE ARQUIVO
+Documentar a forma antiga de cadastro e primeiro login para que ela possa ser restaurada futuramente, se o usuario decidir voltar ao metodo anterior.
+
+RESUMO DO METODO ANTIGO
+No metodo antigo, depois que o usuario fazia o pedido de cadastro e o ADM aprovava, o primeiro login nao entrava no fluxo de foto facial + geracao de placa.
+Ele entrava no modo antigo de upload de imagens, usando a tela /upload-fotos.
+
+PASSO A PASSO DO METODO ANTIGO
+1. Usuario abria a Tela 10 de login.
+2. Usuario digitava telefone e senha.
+3. Usuario tocava em "Inscreva-se agora".
+4. O app chamava /auth/register.
+5. O backend criava uma solicitacao em signupRequests com status "pending".
+6. O usuario ficava aguardando aprovacao do ADM.
+7. O ADM abria o painel administrativo.
+8. O ADM aprovava a solicitacao de cadastro.
+9. Ao aprovar, o backend criava ou ativava o usuario em users.
+10. No metodo antigo, esse usuario era marcado com editMode true e editScope "all".
+11. O usuario voltava para a Tela 10 e fazia login.
+12. O backend respondia o login com editMode true.
+13. O app, ao receber editMode true, redirecionava para /upload-fotos.
+14. Na tela /upload-fotos o usuario precisava selecionar manualmente imagens da galeria.
+15. As imagens obrigatorias antigas eram:
+    - Placa 1 / Tela 4
+    - Tela 6
+    - Tela 11
+16. A Placa 2 podia existir como imagem extra/opcional.
+17. Cada imagem selecionada era salva localmente no app.
+18. Cada imagem tambem era enviada para a nuvem em /photos/sync.
+19. O backend considerava o cadastro completo somente quando existiam Placa 1, Tela 6 e Tela 11.
+20. Depois de concluir, o app chamava /auth/complete-edit-mode.
+21. O backend limpava editMode e editScope.
+22. O usuario passava a acessar o aplicativo normalmente.
+
+ARQUIVOS PRINCIPAIS DO METODO ANTIGO
+- app/tela10.tsx
+  Responsavel por login/cadastro e pelo redirecionamento antigo para /upload-fotos quando editMode era true.
+
+- app/upload-fotos.tsx
+  Tela principal do metodo antigo. Fazia upload manual das imagens de Placa 1, Tela 6, Tela 11 e Placa 2.
+
+- lib/devStorage.ts
+  Salvava as imagens localmente e sincronizava com a nuvem usando keys como placa, tela6, tela11 e placa2.
+
+- backend-ocr/server.js
+  Criava usuarios aprovados com editMode true/editScope all e validava requiredComplete exigindo placaPath, tela6Path e tela11Path.
+
+COMO VOLTAR CONCEITUALMENTE AO METODO ANTIGO
+1. No backend-ocr/server.js, ao aprovar cadastro, voltar a gravar:
+   editMode: true
+   editScope: "all"
+
+2. No app/tela10.tsx, voltar a priorizar:
+   if (data.editMode) router.replace("/upload-fotos");
+
+3. No backend-ocr/server.js, voltar o buildPhotoStatus para exigir:
+   requiredComplete: hasPlaca && hasTela6 && hasTela11
+
+4. No lib/devStorage.ts, voltar o cache completo para exigir:
+   Placa 1 + Tela 6 + Tela 11
+
+5. Manter app/upload-fotos.tsx como tela obrigatoria do primeiro login.
+
+OBSERVACAO IMPORTANTE
+Esse metodo antigo depende de upload manual das telas prontas. Ele nao usa a foto facial capturada para gerar Tela 6 e Tela 11 dinamicamente.
+
+MOTIVO DA SUBSTITUICAO PELO METODO NOVO
+O metodo novo foi criado para que o primeiro login gere o material necessario dentro do proprio app:
+- captura facial;
+- Placa 1 obrigatoria;
+- Placa 2 opcional;
+- Tela 6 dinamica usando foto/nome/telefone;
+- Tela 11 dinamica usando foto/nome/telefone/CNH/veiculo;
+- copia local e envio para nuvem.

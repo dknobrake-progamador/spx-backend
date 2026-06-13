@@ -588,13 +588,18 @@ async function hasCompleteManagedPhotoCacheForCurrentUser() {
     return false;
   }
 
-  const [placaUri, tela6Uri, tela11Uri] = await Promise.all([
+  const [placaUri, tela6Uri, tela11Uri, profileFaceUri] = await Promise.all([
     getPersistedImage(KEY_PLACA),
     getPersistedImage(KEY_TELA6),
     getPersistedImage(KEY_TELA11),
+    getPersistedImage(KEY_PROFILE_FACE_URI),
   ]);
 
-  return [placaUri, tela6Uri, tela11Uri].every((uri) => !!uri && isManagedDevImage(uri));
+  const hasManagedPlaca = !!placaUri && isManagedDevImage(placaUri);
+  const hasLegacyScreens = [tela6Uri, tela11Uri].every((uri) => !!uri && isManagedDevImage(uri));
+  const hasGeneratedScreens = !!profileFaceUri && isManagedDevImage(profileFaceUri);
+
+  return hasManagedPlaca && (hasLegacyScreens || hasGeneratedScreens);
 }
 
 export async function syncCurrentUserPhotosToCloud() {
@@ -627,6 +632,10 @@ export async function syncCurrentUserPhotosToCloud() {
     hasTela6: boolean;
     hasTela11: boolean;
     hasPlaca2: boolean;
+    hasProfileFace: boolean;
+    generatedTela6?: boolean;
+    generatedTela11?: boolean;
+    generationMode?: "profileFace" | "legacyUpload" | "incomplete";
     updatedAtIso: string;
   }>("/photos/sync", {
     method: "POST",
@@ -706,6 +715,10 @@ export async function syncSinglePhotoToCloud(photoKey: CloudPhotoKey, uri: strin
     hasTela6: boolean;
     hasTela11: boolean;
     hasPlaca2: boolean;
+    hasProfileFace: boolean;
+    generatedTela6?: boolean;
+    generatedTela11?: boolean;
+    generationMode?: "profileFace" | "legacyUpload" | "incomplete";
     updatedAtIso: string;
   }>("/photos/sync", {
     method: "POST",
@@ -733,6 +746,10 @@ export async function validateCurrentUserPhotosInCloud() {
     hasTela6: boolean;
     hasTela11: boolean;
     hasPlaca2: boolean;
+    hasProfileFace: boolean;
+    generatedTela6?: boolean;
+    generatedTela11?: boolean;
+    generationMode?: "profileFace" | "legacyUpload" | "incomplete";
     updatedAtIso: string;
   }>("/photos/me", {
     idToken,
@@ -746,6 +763,10 @@ export async function validateCurrentUserPhotosInCloud() {
     hasTela6: result.hasTela6,
     hasTela11: result.hasTela11,
     hasPlaca2: result.hasPlaca2,
+    hasProfileFace: result.hasProfileFace,
+    generatedTela6: result.generatedTela6,
+    generatedTela11: result.generatedTela11,
+    generationMode: result.generationMode,
     updatedAtIso: result.updatedAtIso,
   };
 }

@@ -197,3 +197,23 @@ ALTERACOES FUTURAS
   - Depois fazer Manual Deploy > Clear build cache & deploy.
 - Como desfazer conceitualmente:
   - Remover render.yaml da raiz ou voltar a configuracao manual antiga no painel do Render.
+
+[2026-06-13] Cadastro novo destravado do metodo antigo
+- Arquivos alterados/criados:
+  - app/tela10.tsx
+  - app/placas-carros.tsx
+  - lib/devStorage.ts
+  - backend-ocr/server.js
+  - CADASTRO_ANTIGO_METODO_COMPLETO.txt
+- Motivo:
+  - O primeiro login de novos cadastros ainda podia cair no metodo antigo de upload porque o backend aprovava usuario com editMode true/editScope all.
+  - Contas aprovadas antes da correcao tambem podiam continuar presas no editMode antigo gravado no Firestore.
+- O que foi ajustado:
+  - Novos cadastros aprovados agora sao criados com editMode false e editScope none.
+  - A Tela 10 verifica primeiro se falta foto facial ou Placa 1 antes de respeitar editMode.
+  - O cadastro de placa em modo cadastro tenta finalizar/limpar editMode antigo antes de entrar no app.
+  - O backend passa a considerar completo o novo modelo Placa 1 + Foto facial, mantendo compatibilidade com o modelo antigo Placa 1 + Tela 6 + Tela 11.
+  - O cache local tambem passa a aceitar Placa 1 + Foto facial como conjunto completo do metodo novo.
+  - Criado documento completo do metodo antigo para possivel retorno futuro.
+- Como desfazer conceitualmente:
+  - Seguir o arquivo CADASTRO_ANTIGO_METODO_COMPLETO.txt para restaurar o fluxo antigo de upload manual.

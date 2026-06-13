@@ -385,14 +385,24 @@ function buildPhotoStatus(fields = {}) {
   const hasTela6 = !!fields.tela6Path;
   const hasTela11 = !!fields.tela11Path;
   const hasProfileFace = !!fields.profileFacePath;
+  const legacyScreensComplete = hasTela6 && hasTela11;
+  const generatedScreensComplete = hasProfileFace;
+  const generationMode = generatedScreensComplete
+    ? "profileFace"
+    : legacyScreensComplete
+      ? "legacyUpload"
+      : "incomplete";
 
   return {
-    requiredComplete: hasPlaca && hasTela6 && hasTela11,
+    requiredComplete: hasPlaca && (legacyScreensComplete || generatedScreensComplete),
     hasPlaca,
     hasTela6,
     hasTela11,
     hasPlaca2: !!fields.placa2Path,
     hasProfileFace,
+    generatedTela6: generatedScreensComplete,
+    generatedTela11: generatedScreensComplete,
+    generationMode,
   };
 }
 
@@ -724,8 +734,8 @@ app.patch("/admin/signup-requests/:uid", requireAdmin, async (req, res) => {
           passwordHash: requestData.passwordHash || "",
           role,
           canUploadPhotos,
-          editMode: true,
-          editScope: "all",
+          editMode: false,
+          editScope: "none",
           mustChangePassword: false,
           active: true,
           lastLoginAtIso: "",
@@ -738,8 +748,8 @@ app.patch("/admin/signup-requests/:uid", requireAdmin, async (req, res) => {
         await userRef.set(
           {
             active: true,
-            editMode: true,
-            editScope: "all",
+            editMode: false,
+            editScope: "none",
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true }
@@ -1049,6 +1059,9 @@ app.get("/admin/users/:uid/photos", requireMaster, async (req, res) => {
         hasTela11: false,
         hasPlaca2: false,
         hasProfileFace: false,
+        generatedTela6: false,
+        generatedTela11: false,
+        generationMode: "incomplete",
         updatedAtIso: "",
         photos: {},
       });
@@ -1373,6 +1386,9 @@ app.get("/photos/me", requireAuth, async (req, res) => {
         hasTela11: false,
         hasPlaca2: false,
         hasProfileFace: false,
+        generatedTela6: false,
+        generatedTela11: false,
+        generationMode: "incomplete",
         updatedAtIso: "",
         photos: {},
       });

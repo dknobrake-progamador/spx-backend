@@ -128,11 +128,6 @@ export default function Tela10() {
       return;
     }
 
-    if (data.editMode) {
-      router.replace("/upload-fotos");
-      return;
-    }
-
     try {
       await hydrateCurrentUserPhotosFromCloud({ force: true });
     } catch (error) {
@@ -150,6 +145,11 @@ export default function Tela10() {
     if (!placaUri) {
       await requestFirstAccessPermissions();
       router.replace("/placas-carros?cadastro=1");
+      return;
+    }
+
+    if (data.editMode) {
+      router.replace("/upload-fotos");
       return;
     }
 

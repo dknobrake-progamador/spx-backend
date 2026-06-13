@@ -21,6 +21,7 @@ import {
 } from "../lib/barcode-page-lock";
 import {
   applyGeneratedPlateToUser,
+  completeCurrentUserEditMode,
   getCurrentUserPhone,
   getPlaca2Active,
   setPlaca2Active,
@@ -86,6 +87,16 @@ function escapeXml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+async function finishCadastroAndEnterApp() {
+  try {
+    await completeCurrentUserEditMode();
+  } catch (error) {
+    console.log("[CADASTRO_PLACA] edit mode ja estava finalizado ou nao aplicavel", error);
+  }
+
+  router.replace("/tela2");
 }
 
 function buildPlateSvgMarkup({
@@ -272,7 +283,7 @@ export default function PlacasCarros() {
 
         if (target === "placa2") {
           Alert.alert("Placa 2 salva", "Placa 2 opcional salva com sucesso.", [
-            { text: "Entrar no aplicativo", onPress: () => router.replace("/tela2") },
+            { text: "Entrar no aplicativo", onPress: () => void finishCadastroAndEnterApp() },
           ]);
           return;
         }
@@ -285,7 +296,7 @@ export default function PlacasCarros() {
               setBarcodeResultMode(false);
             },
           },
-          { text: "Entrar no aplicativo", onPress: () => router.replace("/tela2") },
+          { text: "Entrar no aplicativo", onPress: () => void finishCadastroAndEnterApp() },
         ]);
         return;
       }
