@@ -1,5 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
   Alert,
@@ -19,7 +19,17 @@ import {
   BARCODE_PAGE_LOCK,
   getLockedBarcodeMetrics,
 } from "../lib/barcode-page-lock";
-import { applyGeneratedPlateToUser, getPlaca2Active } from "../lib/devStorage";
+import {
+  applyGeneratedPlateToUser,
+  getCurrentUserPhone,
+  getPlaca2Active,
+  setPlaca2Active,
+  setPlaca2Uri,
+  setPlacaUri,
+  setDriverDisplayName,
+  setDriverVehicleType,
+  syncSinglePhotoToCloud,
+} from "../lib/devStorage";
 
 const GENERATE_BUTTON_BARS = Array.from({ length: 56 }, (_, index) => {
   const pattern = ["hair", "thin", "wide", "thin", "medium", "hair", "wide", "thin"];
@@ -158,6 +168,8 @@ function buildPlateSvgMarkupRefined({
 
 export default function PlacasCarros() {
   const { width } = useWindowDimensions();
+  const params = useLocalSearchParams<{ cadastro?: string }>();
+  const cadastroMode = params.cadastro === "1";
   const [barcodeResultMode, setBarcodeResultMode] = useState(false);
   const [barcodeName, setBarcodeName] = useState("RONALD MAC DONALDS");
   const [barcodeId, setBarcodeId] = useState("010102");
@@ -179,15 +191,21 @@ export default function PlacasCarros() {
       let active = true;
 
       (async () => {
-        const placa2Active = await getPlaca2Active();
+        const [placa2Active, phone] = await Promise.all([
+          getPlaca2Active(),
+          getCurrentUserPhone(),
+        ]);
         if (!active) return;
         setImageTarget(placa2Active ? "Placa 2" : "Placa 1");
+        if (cadastroMode && phone) {
+          setTargetLogin(normalizeLogin(phone));
+        }
       })();
 
       return () => {
         active = false;
       };
-    }, [])
+    }, [cadastroMode])
   );
 
   function gerarCodigoBarras() {
@@ -206,13 +224,21 @@ export default function PlacasCarros() {
     setResultId(id);
     setResultVehicleType(tipo);
     setResultPlate(placa);
+    void setDriverDisplayName(nome);
+    void setDriverVehicleType(tipo);
     setBarcodeResultMode(true);
   }
 
   async function enviarCodigoGerado() {
-    const login = normalizeLogin(targetLogin);
+    const currentPhone = cadastroMode ? await getCurrentUserPhone() : null;
+    const login = cadastroMode ? normalizeLogin(currentPhone || "") : normalizeLogin(targetLogin);
     if (!login) {
-      Alert.alert("Login obrigatorio", "Digite o login que vai receber o codigo de barras.");
+      Alert.alert(
+        "Login obrigatorio",
+        cadastroMode
+          ? "Nao foi possivel identificar o login atual. Entre novamente."
+          : "Digite o login que vai receber o codigo de barras."
+      );
       return;
     }
 
@@ -230,6 +256,40 @@ export default function PlacasCarros() {
 
     try {
       setSending(true);
+      await setDriverDisplayName(nome);
+      await setDriverVehicleType(tipo);
+
+      if (cadastroMode) {
+        const target = imageTarget === "Placa 2" ? "placa2" : "placa";
+        if (target === "placa2") {
+          await setPlaca2Uri(imageDataUrl);
+          await setPlaca2Active(true);
+        } else {
+          await setPlacaUri(imageDataUrl);
+        }
+
+        await syncSinglePhotoToCloud(target, imageDataUrl);
+
+        if (target === "placa2") {
+          Alert.alert("Placa 2 salva", "Placa 2 opcional salva com sucesso.", [
+            { text: "Entrar no aplicativo", onPress: () => router.replace("/tela2") },
+          ]);
+          return;
+        }
+
+        Alert.alert("Cadastro concluido", "Placa 1 salva. A Placa 2 e opcional.", [
+          {
+            text: "Adicionar Placa 2",
+            onPress: () => {
+              setImageTarget("Placa 2");
+              setBarcodeResultMode(false);
+            },
+          },
+          { text: "Entrar no aplicativo", onPress: () => router.replace("/tela2") },
+        ]);
+        return;
+      }
+
       await applyGeneratedPlateToUser(
         login,
         imageTarget === "Placa 2" ? "placa2" : "placa",
@@ -256,6 +316,10 @@ export default function PlacasCarros() {
       setBarcodeResultMode(false);
       return;
     }
+    if (cadastroMode) {
+      router.replace("/tela10");
+      return;
+    }
     router.back();
   }
 
@@ -267,7 +331,11 @@ export default function PlacasCarros() {
             <MaterialIcons name="arrow-back" size={22} color="#2d3561" />
           </Pressable>
           <Text style={styles.title}>
-            {barcodeResultMode ? BARCODE_PAGE_LOCK.text.resultTitle : "Placas de carros"}
+            {barcodeResultMode
+              ? BARCODE_PAGE_LOCK.text.resultTitle
+              : cadastroMode
+                ? "Cadastro de placa"
+                : "Placas de carros"}
           </Text>
         </View>
       </View>
@@ -362,19 +430,23 @@ export default function PlacasCarros() {
               <Text style={styles.generateBtnText}>Gerar codigo de barras</Text>
             </Pressable>
             <Text style={styles.generateHint}>O codigo gerado e funcional.</Text>
+            {!cadastroMode ? (
+              <View style={styles.targetCard}>
+                <Text style={styles.targetLabel}>Login que vai receber</Text>
+                <TextInput
+                  value={targetLogin}
+                  onChangeText={(value) => setTargetLogin(normalizeLogin(value))}
+                  placeholder="Digite o login do usuario"
+                  placeholderTextColor="#c5cad8"
+                  keyboardType="number-pad"
+                  style={styles.targetInput}
+                />
+              </View>
+            ) : null}
             <View style={styles.targetCard}>
-              <Text style={styles.targetLabel}>Login que vai receber</Text>
-              <TextInput
-                value={targetLogin}
-                onChangeText={(value) => setTargetLogin(normalizeLogin(value))}
-                placeholder="Digite o login do usuario"
-                placeholderTextColor="#c5cad8"
-                keyboardType="number-pad"
-                style={styles.targetInput}
-              />
-            </View>
-            <View style={styles.targetCard}>
-              <Text style={styles.targetLabel}>Tela que vai receber esta imagem</Text>
+              <Text style={styles.targetLabel}>
+                {cadastroMode ? "Placa do cadastro" : "Tela que vai receber esta imagem"}
+              </Text>
               <View style={styles.targetOptionsRow}>
                 <Pressable
                   onPress={() => setImageTarget("Placa 1")}
@@ -405,7 +477,7 @@ export default function PlacasCarros() {
                       imageTarget === "Placa 2" ? styles.targetOptionTextActive : null,
                     ]}
                   >
-                    Placa 2
+                    {cadastroMode ? "Placa 2 opcional" : "Placa 2"}
                   </Text>
                 </Pressable>
               </View>
@@ -416,7 +488,13 @@ export default function PlacasCarros() {
               style={[styles.sendBtn, sending ? styles.sendBtnDisabled : null]}
             >
               <Text style={styles.sendBtnText}>
-                {sending ? "Enviando..." : "Enviar para o login informado"}
+                {sending
+                  ? "Enviando..."
+                  : cadastroMode
+                    ? imageTarget === "Placa 2"
+                      ? "Salvar Placa 2 opcional"
+                      : "Salvar Placa 1 e continuar"
+                    : "Enviar para o login informado"}
               </Text>
             </Pressable>
           </ScrollView>

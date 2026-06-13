@@ -33,6 +33,11 @@ export const KEY_TELA2_VARIANT = "@DEV_TELA2_VARIANT";
 export const KEY_SCANNED_BR_CODE = "@DEV_SCANNED_BR_CODE";
 export const KEY_SCANNED_OCCURRENCE = "@DEV_SCANNED_OCCURRENCE";
 export const KEY_LABEL_PHOTO_URI = "@DEV_LABEL_PHOTO_URI";
+export const KEY_PROFILE_FACE_URI = "@DEV_PROFILE_FACE_URI";
+export const KEY_PROFILE_AVATAR_URI = "@DEV_PROFILE_AVATAR_URI";
+export const KEY_DRIVER_DISPLAY_NAME = "@DEV_DRIVER_DISPLAY_NAME";
+export const KEY_DRIVER_VEHICLE_TYPE = "@DEV_DRIVER_VEHICLE_TYPE";
+export const KEY_DRIVER_CNH_NUMBER = "@DEV_DRIVER_CNH_NUMBER";
 const MASTER_ADMIN_PHONES = new Set(["21978818116", "5521978818116"]);
 
 /* ===================================== */
@@ -95,6 +100,51 @@ export async function setCurrentUserPhone(phone: string | null) {
 
 export async function getCurrentUserPhone() {
   return await AsyncStorage.getItem(KEY_CURRENT_USER_PHONE);
+}
+
+export async function setDriverDisplayName(name: string | null) {
+  const normalized = name?.trim();
+  if (!normalized) {
+    await AsyncStorage.removeItem(KEY_DRIVER_DISPLAY_NAME);
+    return;
+  }
+  await AsyncStorage.setItem(KEY_DRIVER_DISPLAY_NAME, normalized.toUpperCase());
+}
+
+export async function getDriverDisplayName() {
+  return await AsyncStorage.getItem(KEY_DRIVER_DISPLAY_NAME);
+}
+
+export async function setDriverVehicleType(vehicleType: string | null) {
+  const normalized = vehicleType?.trim();
+  if (!normalized) {
+    await AsyncStorage.removeItem(KEY_DRIVER_VEHICLE_TYPE);
+    return;
+  }
+  await AsyncStorage.setItem(KEY_DRIVER_VEHICLE_TYPE, normalized.toUpperCase());
+}
+
+export async function getDriverVehicleType() {
+  return await AsyncStorage.getItem(KEY_DRIVER_VEHICLE_TYPE);
+}
+
+function generateElevenDigitNumber() {
+  let value = "";
+  for (let index = 0; index < 11; index += 1) {
+    value += String(Math.floor(Math.random() * 10));
+  }
+  return value;
+}
+
+export async function getOrCreateDriverCnhNumber() {
+  const saved = await AsyncStorage.getItem(KEY_DRIVER_CNH_NUMBER);
+  if (saved && /^\d{11}$/.test(saved)) {
+    return saved;
+  }
+
+  const generated = generateElevenDigitNumber();
+  await AsyncStorage.setItem(KEY_DRIVER_CNH_NUMBER, generated);
+  return generated;
 }
 
 export async function setAuthSession(session: {
@@ -246,6 +296,10 @@ export async function getTela6Uri() {
 
 export async function getTela11Uri() {
   return await getPersistedImage(KEY_TELA11);
+}
+
+export async function getProfileFaceUri() {
+  return await getPersistedImage(KEY_PROFILE_FACE_URI);
 }
 
 /* ===================================== */
@@ -550,18 +604,20 @@ export async function syncCurrentUserPhotosToCloud() {
     throw new Error("Sessao invalida para enviar fotos.");
   }
 
-  const [placaUri, placa2Uri, tela6Uri, tela11Uri] = await Promise.all([
+  const [placaUri, placa2Uri, tela6Uri, tela11Uri, profileFaceUri] = await Promise.all([
     getPlacaUri(),
     getPlaca2Uri(),
     getTela6Uri(),
     getTela11Uri(),
+    getProfileFaceUri(),
   ]);
 
-  const [placaDataUrl, placa2DataUrl, tela6DataUrl, tela11DataUrl] = await Promise.all([
+  const [placaDataUrl, placa2DataUrl, tela6DataUrl, tela11DataUrl, profileFaceDataUrl] = await Promise.all([
     uriToDataUrl(placaUri),
     uriToDataUrl(placa2Uri),
     uriToDataUrl(tela6Uri),
     uriToDataUrl(tela11Uri),
+    uriToDataUrl(profileFaceUri),
   ]);
 
   return await apiRequest<{
@@ -582,12 +638,13 @@ export async function syncCurrentUserPhotosToCloud() {
         placa2: placa2DataUrl,
         tela6: tela6DataUrl,
         tela11: tela11DataUrl,
+        profileFace: profileFaceDataUrl,
       },
     },
   });
 }
 
-export type CloudPhotoKey = "placa" | "placa2" | "tela6" | "tela11";
+export type CloudPhotoKey = "placa" | "placa2" | "tela6" | "tela11" | "profileFace";
 
 export type GeneratedPlateTarget = "placa" | "placa2";
 
@@ -710,6 +767,7 @@ export async function hydrateCurrentUserPhotosFromCloud(options?: { force?: bool
       placa2?: string;
       tela6?: string;
       tela11?: string;
+      profileFace?: string;
     };
   }>("/photos/me", {
     idToken,
@@ -724,6 +782,7 @@ export async function hydrateCurrentUserPhotosFromCloud(options?: { force?: bool
     writeCloudPhotoToManagedFile(KEY_PLACA_2, "placa2", photos.placa2),
     writeCloudPhotoToManagedFile(KEY_TELA6, "tela6", photos.tela6),
     writeCloudPhotoToManagedFile(KEY_TELA11, "tela11", photos.tela11),
+    writeCloudPhotoToManagedFile(KEY_PROFILE_FACE_URI, "profile-face", photos.profileFace),
   ]);
 
   const authUid = await AsyncStorage.getItem(KEY_AUTH_UID);

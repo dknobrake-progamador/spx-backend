@@ -1,6 +1,6 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
-import * as NavigationBar from "expo-navigation-bar";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Dimensions,
   PanResponder,
@@ -9,14 +9,70 @@ import {
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
+import {
+  getCurrentUserPhone,
+  getDriverDisplayName,
+  KEY_PROFILE_FACE_URI,
+} from "../lib/devStorage";
+import { uriToDataUrl } from "../lib/photoCache";
 import { TELA6_MENU_HTML } from "../lib/tela6MenuHtml";
 
 const { width, height } = Dimensions.get("window");
 const TELA6_HTML_WIDTH = 465;
 const TELA6_HTML_HEIGHT = 967;
 
-function buildTela6DisplayHtml(scale: number) {
-  const escapedHtml = JSON.stringify(TELA6_MENU_HTML);
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatTela6Phone(phone: string | null) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length >= 12 && digits.startsWith("55")) {
+    return digits.slice(2);
+  }
+  return digits || String(phone || "").trim();
+}
+
+function buildProfileHtml(baseHtml: string, profile: Tela6Profile) {
+  let html = baseHtml
+    .replace(
+      /<div class="profile-name">[\s\S]*?<\/div>/,
+      `<div class="profile-name">${escapeHtml(profile.name || "DOUGLAS GABRIEL")}</div>`
+    )
+    .replace(
+      /<div class="profile-phone">[\s\S]*?<\/div>/,
+      `<div class="profile-phone">${escapeHtml(profile.phone || "21978818116")}</div>`
+    );
+
+  if (profile.faceDataUrl) {
+    html = html.replace(
+      /<div class="avatar">[\s\S]*?<\/div>\s*<div class="profile-text">/,
+      `<div class="avatar"><img src="${profile.faceDataUrl}" style="width:58px;height:58px;object-fit:cover;border-radius:50%;" alt=""></div>
+          <div class="profile-text">`
+    );
+  }
+
+  return html;
+}
+
+type Tela6Profile = {
+  name: string;
+  phone: string;
+  faceDataUrl: string;
+};
+
+function buildTela6DisplayHtml(scale: number, profile: Tela6Profile) {
+  const displayHtmlHeight = Math.max(TELA6_HTML_HEIGHT, Math.ceil(height / scale));
+  const profiledHtml = buildProfileHtml(TELA6_MENU_HTML, profile).replace(
+    /height: 967px/g,
+    `height: ${displayHtmlHeight}px`
+  );
+  const escapedHtml = JSON.stringify(profiledHtml);
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -34,7 +90,7 @@ function buildTela6DisplayHtml(scale: number) {
   }
   #stage {
     width: ${TELA6_HTML_WIDTH}px;
-    height: ${TELA6_HTML_HEIGHT}px;
+    height: ${displayHtmlHeight}px;
     transform: scale(${scale});
     transform-origin: top left;
     border: 0;
@@ -57,11 +113,36 @@ function buildTela6DisplayHtml(scale: number) {
 
 export default function Tela6() {
   const scale = Math.min(width / TELA6_HTML_WIDTH, height / TELA6_HTML_HEIGHT);
-  const html = buildTela6DisplayHtml(scale);
+  const [profile, setProfile] = useState<Tela6Profile>({
+    name: "DOUGLAS GABRIEL",
+    phone: "21978818116",
+    faceDataUrl: "",
+  });
+  const html = buildTela6DisplayHtml(scale, profile);
 
   useEffect(() => {
-    NavigationBar.setBackgroundColorAsync("#ffffff").catch(() => undefined);
-    NavigationBar.setButtonStyleAsync("dark").catch(() => undefined);
+    let alive = true;
+
+    async function loadProfile() {
+      const [name, phone, faceUri] = await Promise.all([
+        getDriverDisplayName(),
+        getCurrentUserPhone(),
+        AsyncStorage.getItem(KEY_PROFILE_FACE_URI),
+      ]);
+      const faceDataUrl = faceUri ? await uriToDataUrl(faceUri) : "";
+      if (!alive) return;
+      setProfile({
+        name: name || "DOUGLAS GABRIEL",
+        phone: formatTela6Phone(phone) || "21978818116",
+        faceDataUrl: faceDataUrl || "",
+      });
+    }
+
+    void loadProfile();
+
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const swipePanResponder = useRef(
@@ -81,7 +162,7 @@ export default function Tela6() {
   return (
     <View style={styles.screen} {...swipePanResponder.panHandlers}>
       <View pointerEvents="none" style={styles.rightGrayBar} />
-      <View pointerEvents="none" style={styles.bottomNativeBar} />
+      <View pointerEvents="none" style={styles.nativeButtonsWhiteArea} />
       <View style={styles.clipArea}>
         <WebView
           source={{ html }}
@@ -168,13 +249,15 @@ const styles = StyleSheet.create({
     width: width * 0.18,
     backgroundColor: "#707070",
   },
-  bottomNativeBar: {
+  nativeButtonsWhiteArea: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    height: Math.max(46, height * 0.045),
+    height: Math.max(24, height * 0.03),
     backgroundColor: "#ffffff",
+    zIndex: 10,
+    elevation: 10,
   },
   hitbox: {
     position: "absolute",

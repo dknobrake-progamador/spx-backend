@@ -82,3 +82,99 @@ ALTERACOES FUTURAS
 - Como desfazer conceitualmente:
   - Remover o import/uso de expo-navigation-bar em app/tela6.tsx.
   - Remover a dependencia expo-navigation-bar do package.json e atualizar o package-lock.json.
+
+[2026-06-12 22:45 -03:00] Remocao do expo-navigation-bar quebrado e perfil dinamico na Tela 6
+- Arquivos alterados:
+  - app/tela6.tsx
+  - app/facial-verification.tsx
+  - app/placas-carros.tsx
+  - lib/devStorage.ts
+  - backend-ocr/server.js
+  - package.json
+  - package-lock.json
+- Motivo:
+  - expo-navigation-bar causou erro 500 no Metro porque o pacote instalado apontava para src/index.ts nao resolvido.
+  - A Tela 6 deve exibir a foto capturada no avatar, o telefone do login e o nome usado na tela de codigo de barras.
+- O que foi ajustado:
+  - Removida a dependencia expo-navigation-bar.
+  - Removido import/uso de NavigationBar da Tela 6.
+  - A captura facial salva a foto local em @DEV_PROFILE_FACE_URI.
+  - A captura facial tenta enviar a foto de perfil para a nuvem como profileFace.
+  - A tela de codigo de barras salva o nome do motorista em @DEV_DRIVER_DISPLAY_NAME.
+  - A Tela 6 injeta no HTML exibido o nome salvo, o telefone do login e a foto capturada.
+  - O backend local passou a aceitar profileFace em PHOTO_KEYS.
+- Observacao:
+  - Para upload/download de profileFace funcionar no servidor publicado, o backend atualizado precisa ser publicado.
+- Como desfazer conceitualmente:
+  - Remover profileFace de PHOTO_KEYS no backend.
+  - Remover KEY_PROFILE_FACE_URI/KEY_DRIVER_DISPLAY_NAME do devStorage.
+  - Voltar a Tela 6 a usar o HTML sem substituicao de perfil.
+
+[2026-06-12 22:58 -03:00] Foto facial persistida como composicao final exibida
+- Arquivos alterados:
+  - app/facial-verification.tsx
+  - package.json
+  - package-lock.json
+- Motivo:
+  - A foto persistida/uploadada estava usando a foto original ou uma versao processada separada, nao a composicao visual final exibida na tela.
+- O que foi ajustado:
+  - Adicionado react-native-view-shot para capturar a view final.
+  - Removido o uso de makeSelfieDocumentWhiteBackground no fluxo de salvamento.
+  - Depois de tirar a foto, a tela renderiza a composicao final: foto principal + documento sobreposto dentro do circulo.
+  - A composicao final renderizada e capturada com captureRef.
+  - FACE_CAPTURE_KEY, FACE_DOCUMENT_CAPTURE_KEY e KEY_PROFILE_FACE_URI passam a receber a imagem composta final.
+  - O upload para nuvem usa a imagem composta final como profileFace.
+- Como desfazer conceitualmente:
+  - Remover react-native-view-shot.
+  - Voltar o fluxo de app/facial-verification.tsx a salvar picture.uri/documentUri diretamente.
+
+[2026-06-12 23:10 -03:00] Tela 11 substituida por HTML de Meu Perfil e avatar circular mais nitido
+- Arquivos alterados:
+  - app/tela11.tsx
+  - lib/tela11PerfilHtml.ts
+  - app/tela6.tsx
+  - app/facial-verification.tsx
+  - lib/devStorage.ts
+- Motivo:
+  - A Tela 11 precisava ser substituida pelo HTML meu_perfil.html.
+  - A foto circular da Tela 6 no telefone novo ficava embacada porque usava a composicao final inteira da captura como avatar.
+- O que foi ajustado:
+  - A Tela 11 passou a renderizar o HTML de perfil via WebView.
+  - O HTML da Tela 11 foi compactado para reduzir altura de linhas e padding.
+  - A Tela 11 herda nome do motorista, telefone do login sem +55 e foto do perfil.
+  - Criada a chave local KEY_PROFILE_AVATAR_URI para guardar a foto original do rosto.
+  - A composicao final continua sendo salva em KEY_PROFILE_FACE_URI e enviada para nuvem como profileFace.
+  - Tela 6 e Tela 11 priorizam KEY_PROFILE_AVATAR_URI no avatar, usando KEY_PROFILE_FACE_URI apenas como fallback.
+- Como desfazer conceitualmente:
+  - Reverter app/tela11.tsx para a tela de imagem antiga.
+  - Remover lib/tela11PerfilHtml.ts.
+  - Remover KEY_PROFILE_AVATAR_URI e voltar Tela 6/Tela 11 a ler somente KEY_PROFILE_FACE_URI.
+
+[2026-06-13 00:40 -03:00] Fluxo de cadastro aprovado com requisitos obrigatorios e reforco da foto facial na nuvem
+- Arquivos alterados:
+  - app/tela10.tsx
+  - app/facial-verification.tsx
+  - app/placas-carros.tsx
+  - lib/devStorage.ts
+  - backend-ocr/server.js
+  - app/painel-admin.tsx
+- Motivo:
+  - O cadastro deve continuar sendo solicitado com telefone/senha e liberado por um ADM.
+  - Somente depois do login aprovado pelo ADM o primeiro acesso deve exigir permissoes, foto facial e cadastro da Placa 1.
+  - A Placa 2 deve continuar opcional.
+  - A foto facial composta deve subir para a nuvem e ficar disponivel para visualizacao do ADM master.
+- O que foi ajustado:
+  - O botao "Inscreva-se agora" voltou a chamar /auth/register e exibir a mensagem de solicitacao pendente.
+  - O primeiro login aprovado hidrata fotos da nuvem e verifica requisitos locais.
+  - Se faltar foto facial, o app pede permissoes de pasta/mapa e abre a tela de captura facial.
+  - Se faltar Placa 1, o app abre app/placas-carros.tsx em modo cadastro.
+  - No modo cadastro, app/placas-carros.tsx usa o telefone do usuario logado, salva Placa 1 localmente e envia para a nuvem.
+  - Placa 2 pode ser adicionada opcionalmente no mesmo fluxo.
+  - A captura facial passa a usar qualidade 1 na camera e continua salvando/uploadando a composicao final como profileFace.
+  - syncCurrentUserPhotosToCloud agora inclui profileFace junto com placa, placa2, tela6 e tela11.
+  - backend-ocr/server.js inclui hasProfileFace no status de fotos e nos logs.
+  - app/painel-admin.tsx passa a listar "Foto facial" na galeria de fotos do usuario.
+- Como desfazer conceitualmente:
+  - Em app/tela10.tsx, remover as verificacoes de getProfileFaceUri/getPlacaUri no login.
+  - Em app/placas-carros.tsx, remover o modo cadastro via parametro cadastro=1.
+  - Em lib/devStorage.ts e backend-ocr/server.js, remover profileFace do sync/listagem se nao quiser mais expor a foto facial ao master.

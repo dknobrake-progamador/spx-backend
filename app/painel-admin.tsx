@@ -38,8 +38,9 @@ type UserPhotosResponse = {
   hasTela6: boolean;
   hasTela11: boolean;
   hasPlaca2: boolean;
+  hasProfileFace?: boolean;
   updatedAtIso: string;
-  photos: Partial<Record<"placa" | "placa2" | "tela6" | "tela11", string>>;
+  photos: Partial<Record<PhotoKey, string>>;
 };
 
 type PasswordUpdateResponse = {
@@ -66,13 +67,16 @@ type SignupRequest = {
   updatedAtIso: string;
 };
 
-const PHOTO_LABELS: Record<"placa" | "placa2" | "tela6" | "tela11", string> = {
+type PhotoKey = "placa" | "tela6" | "tela11" | "placa2" | "profileFace";
+
+const PHOTO_LABELS: Record<PhotoKey, string> = {
   placa: "Placa 1",
   tela6: "Tela 6",
   tela11: "Tela 11",
   placa2: "Placa 2",
+  profileFace: "Foto facial",
 };
-const PHOTO_KEYS = ["placa", "tela6", "tela11", "placa2"] as const;
+const PHOTO_KEYS: readonly PhotoKey[] = ["placa", "tela6", "tela11", "placa2", "profileFace"];
 
 type FilterKey =
   | "all"
@@ -312,6 +316,7 @@ export default function PainelAdmin() {
           hasTela6: false,
           hasTela11: false,
           hasPlaca2: false,
+          hasProfileFace: false,
           updatedAtIso: "",
           photos: {},
         },

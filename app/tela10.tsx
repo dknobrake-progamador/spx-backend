@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialIcons } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -17,9 +18,12 @@ import {
 } from "react-native";
 import { apiRequest } from "../lib/apiClient";
 import {
+  getPlacaUri,
+  getProfileFaceUri,
   hydrateCurrentUserPhotosFromCloud,
   setAuthSession,
 } from "../lib/devStorage";
+import { ensureTela2EmRotaDownloadsPermission } from "../lib/tela2EmRotaEngine";
 
 const LAST_PHONE_KEY = "spx_last_phone";
 const LAST_PASSWORD_KEY = "spx_last_password";
@@ -89,6 +93,22 @@ export default function Tela10() {
       .catch(() => undefined);
   }, []);
 
+  async function requestFirstAccessPermissions() {
+    setStatus("Preparando permissoes do primeiro acesso...");
+
+    try {
+      await ensureTela2EmRotaDownloadsPermission();
+    } catch (error) {
+      console.log("LOGIN_FLOW", "romaneio_permission_skipped_or_failed", error);
+    }
+
+    try {
+      await Location.requestForegroundPermissionsAsync();
+    } catch (error) {
+      console.log("LOGIN_FLOW", "location_permission_failed", error);
+    }
+  }
+
   async function finishAuth(data: AuthResponse, loginPassword: string) {
     setStatus("");
     await setAuthSession({
@@ -119,7 +139,21 @@ export default function Tela10() {
       console.log("LOGIN_FLOW", "cloud_hydrate_failed", error);
     }
 
-    router.replace("/facial-verification");
+    const [profileFaceUri, placaUri] = await Promise.all([getProfileFaceUri(), getPlacaUri()]);
+
+    if (!profileFaceUri) {
+      await requestFirstAccessPermissions();
+      router.replace("/facial-verification");
+      return;
+    }
+
+    if (!placaUri) {
+      await requestFirstAccessPermissions();
+      router.replace("/placas-carros?cadastro=1");
+      return;
+    }
+
+    router.replace("/tela2");
   }
 
   async function submit(mode: "login" | "register") {
@@ -140,7 +174,9 @@ export default function Tela10() {
       });
 
       if (mode === "register") {
-        setStatus("Sem conexao. Verifique sua internet.");
+        await AsyncStorage.setItem(LAST_PHONE_KEY, data.phone || normalizedPhone);
+        setPassword("");
+        setStatus(data.message || "Solicitacao enviada. Aguarde aprovacao do administrador.");
         return;
       }
 
