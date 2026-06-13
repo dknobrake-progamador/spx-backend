@@ -3,14 +3,6 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 
-function getFirstEnv(names) {
-  for (const name of names) {
-    const value = String(process.env[name] || "").trim();
-    if (value) return value;
-  }
-  return "";
-}
-
 function decodeMaybeBase64(value) {
   if (!value) return "";
   const trimmed = String(value).trim();
@@ -24,6 +16,95 @@ function decodeMaybeBase64(value) {
   }
 }
 
+function parseCredentialsCandidate(name, value) {
+  const credentialsJson = decodeMaybeBase64(value) || String(value || "").trim();
+  if (!credentialsJson) return null;
+
+  try {
+    const parsed = JSON.parse(credentialsJson);
+    if (!parsed?.client_email || !parsed?.private_key || !parsed?.project_id) {
+      console.warn("[BOOTSTRAP] Google credentials incompleta ignorada", {
+        name,
+        hasClientEmail: !!parsed?.client_email,
+        hasPrivateKey: !!parsed?.private_key,
+        hasProjectId: !!parsed?.project_id,
+      });
+      return null;
+    }
+    return parsed;
+  } catch (error) {
+    console.warn("[BOOTSTRAP] Google credentials invalida ignorada", {
+      name,
+      length: credentialsJson.length,
+      startsWithJson: credentialsJson.trim().startsWith("{"),
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+function getCredentialsFromEnv(names) {
+  for (const name of names) {
+    const value = String(process.env[name] || "").trim();
+    if (!value) continue;
+    const parsed = parseCredentialsCandidate(name, value);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function getCredentialsFromFile(filePath, label) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) return null;
+    const content = fs.readFileSync(filePath, "utf8");
+    return parseCredentialsCandidate(label || `file:${filePath}`, content);
+  } catch (error) {
+    console.warn("[BOOTSTRAP] falha ao ler arquivo de credencial", {
+      label,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+function getCredentialsFromSecretFiles() {
+  const secretDir = "/etc/secrets";
+  try {
+    if (!fs.existsSync(secretDir)) return null;
+
+    const entries = fs
+      .readdirSync(secretDir)
+      .sort((a, b) => {
+        const score = (name) => {
+          const lower = String(name || "").toLowerCase();
+          if (lower === "google-credentials.json") return 0;
+          if (lower.includes("credential")) return 1;
+          if (lower.includes("firebase")) return 2;
+          if (lower.endsWith(".json")) return 3;
+          return 4;
+        };
+        return score(a) - score(b) || a.localeCompare(b);
+      });
+
+    for (const entry of entries) {
+      const filePath = path.join(secretDir, entry);
+      const parsed = getCredentialsFromFile(filePath, `secret:${entry}`);
+      if (parsed) {
+        console.log("[BOOTSTRAP] credencial Google carregada de Secret File", { entry });
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.warn("[BOOTSTRAP] falha ao varrer /etc/secrets", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return null;
+}
+
 function ensureGoogleCredentialsFile() {
   const applicationCredentials = String(process.env.GOOGLE_APPLICATION_CREDENTIALS || "").trim();
   if (applicationCredentials) {
@@ -32,70 +113,67 @@ function ensureGoogleCredentialsFile() {
       : path.resolve(__dirname, applicationCredentials);
 
     if (fs.existsSync(resolvedPath)) {
-      process.env.GOOGLE_APPLICATION_CREDENTIALS = resolvedPath;
-      return;
+      const parsedFileCredentials = getCredentialsFromFile(
+        resolvedPath,
+        "GOOGLE_APPLICATION_CREDENTIALS_FILE"
+      );
+      if (parsedFileCredentials) {
+        writeRuntimeCredentialsFile(parsedFileCredentials);
+        return;
+      }
+
+      console.warn("[BOOTSTRAP] GOOGLE_APPLICATION_CREDENTIALS existe, mas nao e JSON valido", {
+        resolvedPath,
+      });
     }
 
-    const inlineCredentials = decodeMaybeBase64(applicationCredentials);
-    if (inlineCredentials) {
+    console.warn("[BOOTSTRAP] GOOGLE_APPLICATION_CREDENTIALS path nao encontrado", {
+      resolvedPath,
+    });
+
+    const parsedInlineCredentials = parseCredentialsCandidate(
+      "GOOGLE_APPLICATION_CREDENTIALS",
+      applicationCredentials
+    );
+    if (parsedInlineCredentials) {
       process.env.GOOGLE_APPLICATION_CREDENTIALS = "";
-      writeRuntimeCredentialsFile(inlineCredentials);
+      writeRuntimeCredentialsFile(parsedInlineCredentials);
       return;
     }
   }
 
-  const rawJson = getFirstEnv([
+  const parsedFromEnv = getCredentialsFromEnv([
     "GOOGLE_SERVICE_ACCOUNT_JSON",
     "GOOGLE_CREDENTIALS",
     "GOOGLE_CREDENTIALS_JSON",
     "FIREBASE_SERVICE_ACCOUNT_JSON",
     "FIREBASE_ADMIN_CREDENTIALS",
     "GOOGLE_APPLICATION_CREDENTIALS_JSON",
-  ]);
-  const rawBase64 = getFirstEnv([
     "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
     "GOOGLE_CREDENTIALS_BASE64",
     "FIREBASE_SERVICE_ACCOUNT_JSON_BASE64",
   ]);
 
-  let credentialsJson = rawJson;
-
-  if (!credentialsJson && rawBase64) {
-    credentialsJson = decodeMaybeBase64(rawBase64);
-  }
-
-  if (!credentialsJson) {
-    console.warn(
-      "Google credentials not configured. Set GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_CREDENTIALS, GOOGLE_SERVICE_ACCOUNT_JSON_BASE64, or GOOGLE_APPLICATION_CREDENTIALS."
-    );
+  if (parsedFromEnv) {
+    writeRuntimeCredentialsFile(parsedFromEnv);
     return;
   }
 
-  writeRuntimeCredentialsFile(credentialsJson);
+  const parsedFromSecrets = getCredentialsFromSecretFiles();
+  if (parsedFromSecrets) {
+    writeRuntimeCredentialsFile(parsedFromSecrets);
+    return;
+  }
+
+  if (!parsedFromEnv && !parsedFromSecrets) {
+    console.warn(
+      "Google credentials not configured. Set GOOGLE_APPLICATION_CREDENTIALS, GOOGLE_SERVICE_ACCOUNT_JSON_BASE64, or add a valid Secret File in /etc/secrets."
+    );
+    return;
+  }
 }
 
-function writeRuntimeCredentialsFile(credentialsJson) {
-  let parsed;
-
-  try {
-    parsed = JSON.parse(credentialsJson);
-  } catch (error) {
-    console.error("[BOOTSTRAP] Google credentials JSON invalido", {
-      length: String(credentialsJson || "").length,
-      startsWithJson: String(credentialsJson || "").trim().startsWith("{"),
-      message: error instanceof Error ? error.message : String(error),
-    });
-    throw new Error(
-      "Credencial Google invalida. Configure GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 ou GOOGLE_CREDENTIALS_BASE64 com o JSON completo em base64."
-    );
-  }
-
-  if (!parsed?.client_email || !parsed?.private_key || !parsed?.project_id) {
-    throw new Error(
-      "Credencial Google incompleta. O JSON precisa conter project_id, client_email e private_key."
-    );
-  }
-
+function writeRuntimeCredentialsFile(parsed) {
   const credentialsPath = path.join(__dirname, ".runtime-google-credentials.json");
 
   fs.writeFileSync(credentialsPath, JSON.stringify(parsed, null, 2));
