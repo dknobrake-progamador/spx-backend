@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: spx-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: FIREBASE_PROJECT_ID
+        value: spx-motorista-parceiro
+      - key: FIREBASE_WEB_API_KEY
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false

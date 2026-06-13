@@ -1,0 +1,5 @@
+node_modules/
+.env
+google-credentials.json
+*-adminsdk-*.json
+.runtime-google-credentials.json
