@@ -178,3 +178,22 @@ ALTERACOES FUTURAS
   - Em app/tela10.tsx, remover as verificacoes de getProfileFaceUri/getPlacaUri no login.
   - Em app/placas-carros.tsx, remover o modo cadastro via parametro cadastro=1.
   - Em lib/devStorage.ts e backend-ocr/server.js, remover profileFace do sync/listagem se nao quiser mais expor a foto facial ao master.
+
+[2026-06-13 05:20 -03:00] Configuracao Render para backend-ocr
+- Arquivos alterados:
+  - render.yaml
+- Motivo:
+  - O Render estava tentando executar node backend-ocr/server.js e falhava com Cannot find module /opt/render/project/src/backend-ocr/server.js.
+  - O backend deve iniciar por npm start dentro de backend-ocr, pois npm start executa bootstrap.js.
+  - bootstrap.js cria o arquivo temporario de credenciais quando GOOGLE_SERVICE_ACCOUNT_JSON ou GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 esta configurado.
+- O que foi ajustado:
+  - Criado render.yaml na raiz com rootDir: backend-ocr.
+  - Build command definido como npm install.
+  - Start command definido como npm start.
+- Como aplicar no Render manualmente:
+  - Settings > Root Directory: backend-ocr
+  - Build Command: npm install
+  - Start Command: npm start
+  - Depois fazer Manual Deploy > Clear build cache & deploy.
+- Como desfazer conceitualmente:
+  - Remover render.yaml da raiz ou voltar a configuracao manual antiga no painel do Render.
