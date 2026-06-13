@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
@@ -9,7 +8,7 @@ import {
   getDriverDisplayName,
   getDriverVehicleType,
   getOrCreateDriverCnhNumber,
-  KEY_PROFILE_FACE_URI,
+  getProfileFaceUri,
 } from "../lib/devStorage";
 import { uriToDataUrl } from "../lib/photoCache";
 import { TELA11_DEFAULT_AVATAR, TELA11_PERFIL_HTML } from "../lib/tela11PerfilHtml";
@@ -38,7 +37,7 @@ function formatPhone(value: string) {
   if (digits.startsWith("55") && digits.length > 11) {
     return digits.slice(2);
   }
-  return digits || "21978818116";
+  return digits;
 }
 
 function buildTela11Html(profile: PerfilTela11) {
@@ -47,19 +46,19 @@ function buildTela11Html(profile: PerfilTela11) {
     : TELA11_DEFAULT_AVATAR;
 
   return TELA11_PERFIL_HTML.replace("__PROFILE_AVATAR__", avatar)
-    .replace("__PROFILE_NAME__", escapeHtml(profile.name || "DOUGLAS GABRIEL"))
+    .replace("__PROFILE_NAME__", escapeHtml(profile.name))
     .replace("__PROFILE_PHONE__", escapeHtml(formatPhone(profile.phone)))
-    .replace("__PROFILE_CNH__", escapeHtml(profile.cnh || "00000000000"))
-    .replace("__PROFILE_VEHICLE_TYPE__", escapeHtml(profile.vehicleType || "VUC"));
+    .replace("__PROFILE_CNH__", escapeHtml(profile.cnh))
+    .replace("__PROFILE_VEHICLE_TYPE__", escapeHtml(profile.vehicleType));
 }
 
 export default function Tela11() {
   const [profile, setProfile] = useState<PerfilTela11>({
     faceDataUrl: null,
-    name: "DOUGLAS GABRIEL",
-    phone: "21978818116",
-    cnh: "00000000000",
-    vehicleType: "VUC",
+    name: "",
+    phone: "",
+    cnh: "",
+    vehicleType: "",
   });
 
   useEffect(() => {
@@ -71,7 +70,7 @@ export default function Tela11() {
         getCurrentUserPhone(),
         getDriverVehicleType(),
         getOrCreateDriverCnhNumber(),
-        AsyncStorage.getItem(KEY_PROFILE_FACE_URI),
+        getProfileFaceUri(),
       ]);
 
       let faceDataUrl: string | null = null;
@@ -86,10 +85,10 @@ export default function Tela11() {
       if (!alive) return;
       setProfile({
         faceDataUrl,
-        name: savedName || "DOUGLAS GABRIEL",
-        phone: savedPhone || "21978818116",
-        cnh: savedCnh || "00000000000",
-        vehicleType: savedVehicleType || "VUC",
+        name: savedName || "",
+        phone: savedPhone || "",
+        cnh: savedCnh || "",
+        vehicleType: savedVehicleType || "",
       });
     }
 

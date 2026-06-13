@@ -104,6 +104,7 @@ export default function PainelAdmin() {
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<AdminUser | null>(null);
   const [deleteConfirmStep, setDeleteConfirmStep] = useState<1 | 2>(1);
   const [deleteConfirmDigits, setDeleteConfirmDigits] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const [activeSort, setActiveSort] = useState<SortKey>("phone_asc");
@@ -508,14 +509,28 @@ export default function PainelAdmin() {
     return "Usuario";
   }
 
+  function aplicarBusca() {
+    setSearchTerm(searchDraft.trim());
+  }
+
+  function limparBusca() {
+    setSearchDraft("");
+    setSearchTerm("");
+  }
+
   const filteredUsers = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
+    const searchDigits = normalizedSearch.replace(/\D/g, "");
     let next = [...users];
 
     if (normalizedSearch) {
       next = next.filter((user) => {
         const haystack = `${user.phone} ${user.uid}`.toLowerCase();
-        return haystack.includes(normalizedSearch);
+        const haystackDigits = `${user.phone} ${user.uid}`.replace(/\D/g, "");
+        return (
+          haystack.includes(normalizedSearch) ||
+          (!!searchDigits && haystackDigits.includes(searchDigits))
+        );
       });
     }
 
@@ -621,13 +636,26 @@ export default function PainelAdmin() {
             </View>
 
             <View style={styles.controlsBlock}>
-              <TextInput
-                value={searchTerm}
-                onChangeText={setSearchTerm}
-                placeholder="Buscar por telefone ou login"
-                placeholderTextColor="#71717a"
-                style={styles.searchInput}
-              />
+              <View style={styles.searchRow}>
+                <TextInput
+                  value={searchDraft}
+                  onChangeText={setSearchDraft}
+                  onSubmitEditing={aplicarBusca}
+                  placeholder="Buscar por telefone ou login"
+                  placeholderTextColor="#71717a"
+                  keyboardType="phone-pad"
+                  returnKeyType="search"
+                  style={styles.searchInput}
+                />
+                <Pressable onPress={aplicarBusca} style={styles.searchButton}>
+                  <Text style={styles.searchButtonText}>Buscar</Text>
+                </Pressable>
+              </View>
+              {searchTerm ? (
+                <Pressable onPress={limparBusca} style={styles.clearSearchButton}>
+                  <Text style={styles.clearSearchText}>Limpar busca: {searchTerm}</Text>
+                </Pressable>
+              ) : null}
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
                 {[
@@ -1433,6 +1461,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   searchInput: {
+    flex: 1,
     minHeight: 52,
     borderRadius: 16,
     borderWidth: 1,
@@ -1441,6 +1470,38 @@ const styles = StyleSheet.create({
     color: "#fafafa",
     paddingHorizontal: 14,
     fontSize: 15,
+  },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  searchButton: {
+    minHeight: 52,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#facc15",
+  },
+  searchButtonText: {
+    color: "#09090b",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  clearSearchButton: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#18181b",
+    borderWidth: 1,
+    borderColor: "#3f3f46",
+  },
+  clearSearchText: {
+    color: "#f4f4f5",
+    fontSize: 12,
+    fontWeight: "700",
   },
   chipsRow: {
     gap: 10,

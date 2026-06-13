@@ -39,6 +39,56 @@ export const KEY_DRIVER_DISPLAY_NAME = "@DEV_DRIVER_DISPLAY_NAME";
 export const KEY_DRIVER_VEHICLE_TYPE = "@DEV_DRIVER_VEHICLE_TYPE";
 export const KEY_DRIVER_CNH_NUMBER = "@DEV_DRIVER_CNH_NUMBER";
 const MASTER_ADMIN_PHONES = new Set(["21978818116", "5521978818116"]);
+const FACE_CAPTURE_KEY = "@DEV_FACE_CAPTURE_URI";
+const FACE_DOCUMENT_CAPTURE_KEY = "@DEV_FACE_DOCUMENT_CAPTURE_URI";
+const USER_SCOPED_IMAGE_KEYS = [
+  KEY_PLACA,
+  KEY_PLACA_2,
+  KEY_TELA6,
+  KEY_TELA11,
+  KEY_LABEL_PHOTO_URI,
+  KEY_PROFILE_FACE_URI,
+  KEY_PROFILE_AVATAR_URI,
+];
+const USER_SCOPED_DATA_KEYS = [
+  KEY_PLACA_2_ACTIVE,
+  KEY_CURRENT_PROFILE,
+  KEY_DRIVER_DISPLAY_NAME,
+  KEY_DRIVER_VEHICLE_TYPE,
+  KEY_DRIVER_CNH_NUMBER,
+  KEY_PHOTO_CACHE_UID,
+  FACE_CAPTURE_KEY,
+  FACE_DOCUMENT_CAPTURE_KEY,
+];
+
+async function getDynamicUserScopedKeys() {
+  const allKeys = await AsyncStorage.getAllKeys();
+  return allKeys.filter((key) => key.startsWith(`${KEY_LABEL_PHOTO_URI}_`));
+}
+
+async function clearUserScopedLocalState() {
+  const dynamicPhotoKeys = await getDynamicUserScopedKeys();
+  const imageKeys = [...USER_SCOPED_IMAGE_KEYS, ...dynamicPhotoKeys];
+  const imageValues = await AsyncStorage.multiGet(imageKeys);
+
+  await Promise.all(imageValues.map(([, uri]) => deleteIfManaged(uri)));
+  await AsyncStorage.multiRemove([...imageKeys, ...USER_SCOPED_DATA_KEYS]);
+}
+
+async function replaceCloudPhotoToManagedFile(
+  key: string,
+  fileBaseName: string,
+  cloudValue?: string
+) {
+  const value = cloudValue?.trim();
+  if (!value) {
+    await deleteIfManaged(await AsyncStorage.getItem(key));
+    await AsyncStorage.removeItem(key);
+    return;
+  }
+
+  await writeCloudPhotoToManagedFile(key, fileBaseName, value);
+}
 
 /* ===================================== */
 /* ✅ SALVAR OU RESETAR (AGORA FUNCIONA) */
@@ -128,6 +178,15 @@ export async function getDriverVehicleType() {
   return await AsyncStorage.getItem(KEY_DRIVER_VEHICLE_TYPE);
 }
 
+export async function setDriverCnhNumber(cnhNumber: string | null) {
+  const digits = String(cnhNumber || "").replace(/\D/g, "");
+  if (!/^\d{11}$/.test(digits)) {
+    await AsyncStorage.removeItem(KEY_DRIVER_CNH_NUMBER);
+    return;
+  }
+  await AsyncStorage.setItem(KEY_DRIVER_CNH_NUMBER, digits);
+}
+
 function generateElevenDigitNumber() {
   let value = "";
   for (let index = 0; index < 11; index += 1) {
@@ -156,6 +215,7 @@ export async function setAuthSession(session: {
   mustChangePassword?: boolean;
 } | null) {
   if (!session) {
+    await clearUserScopedLocalState();
     await AsyncStorage.multiRemove([
       KEY_CURRENT_USER_PHONE,
       KEY_AUTH_UID,
@@ -165,6 +225,16 @@ export async function setAuthSession(session: {
       KEY_AUTH_MUST_CHANGE_PASSWORD,
     ]);
     return;
+  }
+
+  const [previousUid, photoCacheUid] = await Promise.all([
+    AsyncStorage.getItem(KEY_AUTH_UID),
+    AsyncStorage.getItem(KEY_PHOTO_CACHE_UID),
+  ]);
+  const sameCachedUser = previousUid === session.uid || photoCacheUid === session.uid;
+
+  if (!sameCachedUser) {
+    await clearUserScopedLocalState();
   }
 
   await AsyncStorage.multiSet([
@@ -602,6 +672,58 @@ async function hasCompleteManagedPhotoCacheForCurrentUser() {
   return hasManagedPlaca && (hasLegacyScreens || hasGeneratedScreens);
 }
 
+export type CloudRegistrationMetadata = {
+  driverDisplayName?: string;
+  driverVehicleType?: string;
+  driverCnhNumber?: string;
+  registrationMode?: "profileFace" | "legacyUpload" | "incomplete";
+};
+
+function normalizeCloudRegistrationMetadata(metadata?: CloudRegistrationMetadata | null) {
+  const driverDisplayName = String(metadata?.driverDisplayName || "").trim().toUpperCase();
+  const driverVehicleType = String(metadata?.driverVehicleType || "").trim().toUpperCase();
+  const driverCnhNumber = String(metadata?.driverCnhNumber || "").replace(/\D/g, "");
+  const registrationMode = metadata?.registrationMode || "profileFace";
+
+  return {
+    ...(driverDisplayName ? { driverDisplayName } : {}),
+    ...(driverVehicleType ? { driverVehicleType } : {}),
+    ...(/^\d{11}$/.test(driverCnhNumber) ? { driverCnhNumber } : {}),
+    registrationMode,
+  };
+}
+
+async function getCurrentRegistrationMetadata() {
+  const [driverDisplayName, driverVehicleType, driverCnhNumber] = await Promise.all([
+    getDriverDisplayName(),
+    getDriverVehicleType(),
+    getOrCreateDriverCnhNumber(),
+  ]);
+
+  return normalizeCloudRegistrationMetadata({
+    driverDisplayName: driverDisplayName || "",
+    driverVehicleType: driverVehicleType || "",
+    driverCnhNumber,
+    registrationMode: "profileFace",
+  });
+}
+
+async function persistCloudRegistrationMetadata(metadata?: CloudRegistrationMetadata | null) {
+  if (!metadata) return;
+
+  await Promise.all([
+    metadata.driverDisplayName !== undefined
+      ? setDriverDisplayName(metadata.driverDisplayName)
+      : Promise.resolve(),
+    metadata.driverVehicleType !== undefined
+      ? setDriverVehicleType(metadata.driverVehicleType)
+      : Promise.resolve(),
+    metadata.driverCnhNumber !== undefined
+      ? setDriverCnhNumber(metadata.driverCnhNumber)
+      : Promise.resolve(),
+  ]);
+}
+
 export async function syncCurrentUserPhotosToCloud() {
   const phone = await getCurrentUserPhone();
   const idToken = await getAuthIdToken();
@@ -636,6 +758,7 @@ export async function syncCurrentUserPhotosToCloud() {
     generatedTela6?: boolean;
     generatedTela11?: boolean;
     generationMode?: "profileFace" | "legacyUpload" | "incomplete";
+    metadata?: CloudRegistrationMetadata;
     updatedAtIso: string;
   }>("/photos/sync", {
     method: "POST",
@@ -649,6 +772,7 @@ export async function syncCurrentUserPhotosToCloud() {
         tela11: tela11DataUrl,
         profileFace: profileFaceDataUrl,
       },
+      metadata: await getCurrentRegistrationMetadata(),
     },
   });
 }
@@ -696,7 +820,11 @@ export async function applyGeneratedPlateToUser(
   }
 }
 
-export async function syncSinglePhotoToCloud(photoKey: CloudPhotoKey, uri: string) {
+export async function syncSinglePhotoToCloud(
+  photoKey: CloudPhotoKey,
+  uri: string,
+  metadata?: CloudRegistrationMetadata
+) {
   const phone = await getCurrentUserPhone();
   const idToken = await getAuthIdToken();
   if (!phone || !idToken) {
@@ -719,6 +847,7 @@ export async function syncSinglePhotoToCloud(photoKey: CloudPhotoKey, uri: strin
     generatedTela6?: boolean;
     generatedTela11?: boolean;
     generationMode?: "profileFace" | "legacyUpload" | "incomplete";
+    metadata?: CloudRegistrationMetadata;
     updatedAtIso: string;
   }>("/photos/sync", {
     method: "POST",
@@ -728,6 +857,31 @@ export async function syncSinglePhotoToCloud(photoKey: CloudPhotoKey, uri: strin
       photos: {
         [photoKey]: dataUrl,
       },
+      metadata: normalizeCloudRegistrationMetadata(metadata || (await getCurrentRegistrationMetadata())),
+    },
+  });
+}
+
+export async function syncCurrentUserRegistrationMetadataToCloud(
+  metadata?: CloudRegistrationMetadata
+) {
+  const phone = await getCurrentUserPhone();
+  const idToken = await getAuthIdToken();
+  if (!phone || !idToken) {
+    throw new Error("Sessao invalida para enviar dados do cadastro.");
+  }
+
+  return await apiRequest<{
+    ok: boolean;
+    metadata?: CloudRegistrationMetadata;
+    updatedAtIso: string;
+  }>("/photos/sync", {
+    method: "POST",
+    idToken,
+    timeoutMs: 30000,
+    body: {
+      photos: {},
+      metadata: normalizeCloudRegistrationMetadata(metadata || (await getCurrentRegistrationMetadata())),
     },
   });
 }
@@ -750,6 +904,7 @@ export async function validateCurrentUserPhotosInCloud() {
     generatedTela6?: boolean;
     generatedTela11?: boolean;
     generationMode?: "profileFace" | "legacyUpload" | "incomplete";
+    metadata?: CloudRegistrationMetadata;
     updatedAtIso: string;
   }>("/photos/me", {
     idToken,
@@ -767,6 +922,7 @@ export async function validateCurrentUserPhotosInCloud() {
     generatedTela6: result.generatedTela6,
     generatedTela11: result.generatedTela11,
     generationMode: result.generationMode,
+    metadata: result.metadata,
     updatedAtIso: result.updatedAtIso,
   };
 }
@@ -790,21 +946,32 @@ export async function hydrateCurrentUserPhotosFromCloud(options?: { force?: bool
       tela11?: string;
       profileFace?: string;
     };
+    metadata?: CloudRegistrationMetadata;
   }>("/photos/me", {
     idToken,
     timeoutMs: 120000,
   });
 
-  if (!payload.exists) return;
+  if (!payload.exists) {
+    await clearUserScopedLocalState();
+    return;
+  }
   const photos = payload.photos || {};
 
   await Promise.all([
-    writeCloudPhotoToManagedFile(KEY_PLACA, "placa", photos.placa),
-    writeCloudPhotoToManagedFile(KEY_PLACA_2, "placa2", photos.placa2),
-    writeCloudPhotoToManagedFile(KEY_TELA6, "tela6", photos.tela6),
-    writeCloudPhotoToManagedFile(KEY_TELA11, "tela11", photos.tela11),
-    writeCloudPhotoToManagedFile(KEY_PROFILE_FACE_URI, "profile-face", photos.profileFace),
+    replaceCloudPhotoToManagedFile(KEY_PLACA, "placa", photos.placa),
+    replaceCloudPhotoToManagedFile(KEY_PLACA_2, "placa2", photos.placa2),
+    replaceCloudPhotoToManagedFile(KEY_TELA6, "tela6", photos.tela6),
+    replaceCloudPhotoToManagedFile(KEY_TELA11, "tela11", photos.tela11),
+    replaceCloudPhotoToManagedFile(KEY_PROFILE_FACE_URI, "profile-face", photos.profileFace),
   ]);
+  if (!photos.placa2) {
+    await AsyncStorage.removeItem(KEY_PLACA_2_ACTIVE);
+  } else {
+    await AsyncStorage.setItem(KEY_PLACA_2_ACTIVE, "1");
+  }
+
+  await persistCloudRegistrationMetadata(payload.metadata);
 
   const authUid = await AsyncStorage.getItem(KEY_AUTH_UID);
   if (authUid) {
@@ -822,6 +989,8 @@ export async function clearDevUris() {
   await deleteIfManaged(await AsyncStorage.getItem(KEY_TELA6));
   await deleteIfManaged(await AsyncStorage.getItem(KEY_TELA11));
   await deleteIfManaged(await AsyncStorage.getItem(KEY_LABEL_PHOTO_URI));
+  await deleteIfManaged(await AsyncStorage.getItem(KEY_PROFILE_FACE_URI));
+  await deleteIfManaged(await AsyncStorage.getItem(KEY_PROFILE_AVATAR_URI));
 
   const allKeys = await AsyncStorage.getAllKeys();
   const dynamicKeys = allKeys.filter(
@@ -847,6 +1016,11 @@ export async function clearDevUris() {
     KEY_PHOTO_CACHE_UID,
     KEY_TELA6,
     KEY_TELA11,
+    KEY_PROFILE_FACE_URI,
+    KEY_PROFILE_AVATAR_URI,
+    KEY_DRIVER_DISPLAY_NAME,
+    KEY_DRIVER_VEHICLE_TYPE,
+    KEY_DRIVER_CNH_NUMBER,
     KEY_TELA3_CALL_COUNT,
     KEY_TELA3_CALL_LOG,
     KEY_TELA3_OCCURRENCE_COUNT,

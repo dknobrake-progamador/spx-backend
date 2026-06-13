@@ -6,9 +6,22 @@ const LEGACY_IMAGES_DIR = `${FileSystem.documentDirectory}dev-images/`;
 const LOCAL_LOGIN_PHOTOS_DIR = `${FileSystem.documentDirectory}salva-localmente-placas-e-telas/`;
 
 export function getImageExtension(uri: string) {
+  if (uri.startsWith("data:image/")) {
+    const mime = uri.match(/^data:(image\/[a-zA-Z0-9.+-]+)/)?.[1] || "";
+    return getExtensionFromMime(mime);
+  }
+
   const cleanUri = uri.split("?")[0];
   const match = cleanUri.match(/\.([a-zA-Z0-9]+)$/);
   return match ? match[1].toLowerCase() : "jpg";
+}
+
+function getExtensionFromMime(mime: string) {
+  if (mime.includes("svg")) return "svg";
+  if (mime.includes("png")) return "png";
+  if (mime.includes("webp")) return "webp";
+  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpg";
+  return "jpg";
 }
 
 export function isManagedDevImage(uri: string) {
@@ -88,6 +101,11 @@ export async function persistImage(key: string, uri: string | null, fileBaseName
 
   await ensureDevImagesDir();
 
+  if (uri.startsWith("data:image/")) {
+    await writeDataUrlToManagedFile(key, fileBaseName, uri);
+    return;
+  }
+
   const extension = getImageExtension(uri);
   const destinationUri = getManagedDestinationUri(fileBaseName, extension);
 
@@ -149,19 +167,14 @@ async function writeDataUrlToManagedFile(
   dataUrl: string
 ) {
   if (!dataUrl || !dataUrl.startsWith("data:image/")) return;
-  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+)(?:;[^,]*)?,([\s\S]+)$/);
   if (!match) return;
 
   await ensureDevImagesDir();
   const mime = match[1];
-  const base64 = match[2];
-  const ext = mime.includes("svg")
-    ? "svg"
-    : mime.includes("png")
-      ? "png"
-      : mime.includes("webp")
-        ? "webp"
-        : "jpg";
+  const payload = match[2];
+  const isBase64 = dataUrl.slice(0, dataUrl.indexOf(",")).toLowerCase().includes(";base64");
+  const ext = getExtensionFromMime(mime);
   const destinationUri = getLocalLoginPhotoDestinationUri(fileBaseName, ext);
 
   const previousUri = await AsyncStorage.getItem(key);
@@ -169,9 +182,25 @@ async function writeDataUrlToManagedFile(
     await deleteIfManaged(previousUri);
   }
 
-  await FileSystem.writeAsStringAsync(destinationUri, base64, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  const destinationInfo = await FileSystem.getInfoAsync(destinationUri);
+  if (destinationInfo.exists) {
+    await FileSystem.deleteAsync(destinationUri, { idempotent: true });
+  }
+
+  if (isBase64) {
+    await FileSystem.writeAsStringAsync(destinationUri, payload, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  } else {
+    let decodedPayload = payload;
+    try {
+      decodedPayload = decodeURIComponent(payload);
+    } catch {
+      // Mantem o payload original se vier com algum escape invalido.
+    }
+    await FileSystem.writeAsStringAsync(destinationUri, decodedPayload);
+  }
+
   await AsyncStorage.setItem(key, destinationUri);
 }
 

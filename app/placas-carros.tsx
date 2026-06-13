@@ -269,6 +269,11 @@ export default function PlacasCarros() {
       setSending(true);
       await setDriverDisplayName(nome);
       await setDriverVehicleType(tipo);
+      const registrationMetadata = {
+        driverDisplayName: nome,
+        driverVehicleType: tipo,
+        registrationMode: "profileFace" as const,
+      };
 
       if (cadastroMode) {
         const target = imageTarget === "Placa 2" ? "placa2" : "placa";
@@ -279,7 +284,7 @@ export default function PlacasCarros() {
           await setPlacaUri(imageDataUrl);
         }
 
-        await syncSinglePhotoToCloud(target, imageDataUrl);
+        await syncSinglePhotoToCloud(target, imageDataUrl, registrationMetadata);
 
         if (target === "placa2") {
           Alert.alert("Placa 2 salva", "Placa 2 opcional salva com sucesso.", [

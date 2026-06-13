@@ -217,3 +217,28 @@ ALTERACOES FUTURAS
   - Criado documento completo do metodo antigo para possivel retorno futuro.
 - Como desfazer conceitualmente:
   - Seguir o arquivo CADASTRO_ANTIGO_METODO_COMPLETO.txt para restaurar o fluxo antigo de upload manual.
+
+[2026-06-13] Cache SVG da placa e cadastro reidratavel pela nuvem
+- Arquivos alterados:
+  - lib/photoCache.ts
+  - lib/devStorage.ts
+  - app/placas-carros.tsx
+  - app/tela6.tsx
+  - app/tela11.tsx
+  - backend-ocr/server.js
+- Motivo:
+  - A placa gerada em cadastro vinha como data:image/svg+xml;utf8 e o cache tentava copiar como arquivo fisico, causando erro no ExponentFileSystem.copyAsync.
+  - Novo aparelho nao deve precisar refazer captura facial nem preencher placa se foto/placas/dados ja estiverem na nuvem.
+  - Tela 6 e Tela 11 nao podem exibir dados de exemplo antes de carregar os dados reais do usuario logado.
+- O que foi ajustado:
+  - data:image/svg+xml agora e gravado como arquivo .svg local real antes de persistir a chave.
+  - O cadastro de placa envia para a nuvem a placa junto com metadados do motorista: nome, tipo de veiculo, CNH e modo de registro.
+  - O backend /photos/sync grava metadados no documento userPhotos e /photos/me devolve esses metadados.
+  - Ao logar em outro aparelho, hydrateCurrentUserPhotosFromCloud baixa placa, placa2, foto facial e regrava os metadados localmente.
+  - Se placa2 existir na nuvem, o app tambem restaura a chave local de placa2 ativa.
+  - Tela 6 e Tela 11 passam a iniciar vazias e so preencher com dados reais da sessao/cache/nuvem.
+- Como desfazer conceitualmente:
+  - Reverter a gravacao de data URL em lib/photoCache.ts.
+  - Remover metadata de /photos/sync e /photos/me no backend.
+  - Remover o terceiro parametro de syncSinglePhotoToCloud em app/placas-carros.tsx.
+  - Restaurar os fallbacks antigos de Tela 6/Tela 11 somente se aceitar dados fixos de exemplo no primeiro render.

@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -12,7 +11,7 @@ import { WebView } from "react-native-webview";
 import {
   getCurrentUserPhone,
   getDriverDisplayName,
-  KEY_PROFILE_FACE_URI,
+  getProfileFaceUri,
 } from "../lib/devStorage";
 import { uriToDataUrl } from "../lib/photoCache";
 import { TELA6_MENU_HTML } from "../lib/tela6MenuHtml";
@@ -42,20 +41,21 @@ function buildProfileHtml(baseHtml: string, profile: Tela6Profile) {
   let html = baseHtml
     .replace(
       /<div class="profile-name">[\s\S]*?<\/div>/,
-      `<div class="profile-name">${escapeHtml(profile.name || "DOUGLAS GABRIEL")}</div>`
+      `<div class="profile-name">${escapeHtml(profile.name)}</div>`
     )
     .replace(
       /<div class="profile-phone">[\s\S]*?<\/div>/,
-      `<div class="profile-phone">${escapeHtml(profile.phone || "21978818116")}</div>`
+      `<div class="profile-phone">${escapeHtml(profile.phone)}</div>`
     );
 
-  if (profile.faceDataUrl) {
-    html = html.replace(
-      /<div class="avatar">[\s\S]*?<\/div>\s*<div class="profile-text">/,
-      `<div class="avatar"><img src="${profile.faceDataUrl}" style="width:58px;height:58px;object-fit:cover;border-radius:50%;" alt=""></div>
+  html = html.replace(
+    /<div class="avatar">[\s\S]*?<\/div>\s*<div class="profile-text">/,
+    profile.faceDataUrl
+      ? `<div class="avatar"><img src="${profile.faceDataUrl}" style="width:58px;height:58px;object-fit:cover;border-radius:50%;" alt=""></div>
           <div class="profile-text">`
-    );
-  }
+      : `<div class="avatar" style="background:transparent;"></div>
+          <div class="profile-text">`
+  );
 
   return html;
 }
@@ -114,8 +114,8 @@ function buildTela6DisplayHtml(scale: number, profile: Tela6Profile) {
 export default function Tela6() {
   const scale = Math.min(width / TELA6_HTML_WIDTH, height / TELA6_HTML_HEIGHT);
   const [profile, setProfile] = useState<Tela6Profile>({
-    name: "DOUGLAS GABRIEL",
-    phone: "21978818116",
+    name: "",
+    phone: "",
     faceDataUrl: "",
   });
   const html = buildTela6DisplayHtml(scale, profile);
@@ -127,13 +127,20 @@ export default function Tela6() {
       const [name, phone, faceUri] = await Promise.all([
         getDriverDisplayName(),
         getCurrentUserPhone(),
-        AsyncStorage.getItem(KEY_PROFILE_FACE_URI),
+        getProfileFaceUri(),
       ]);
-      const faceDataUrl = faceUri ? await uriToDataUrl(faceUri) : "";
+      let faceDataUrl = "";
+      if (faceUri) {
+        try {
+          faceDataUrl = await uriToDataUrl(faceUri);
+        } catch (error) {
+          console.log("[TELA6] falha ao converter foto do perfil:", error);
+        }
+      }
       if (!alive) return;
       setProfile({
-        name: name || "DOUGLAS GABRIEL",
-        phone: formatTela6Phone(phone) || "21978818116",
+        name: name || "",
+        phone: formatTela6Phone(phone) || "",
         faceDataUrl: faceDataUrl || "",
       });
     }

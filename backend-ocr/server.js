@@ -406,6 +406,35 @@ function buildPhotoStatus(fields = {}) {
   };
 }
 
+function cleanPhotoMetadataValue(value, maxLength = 120) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function normalizePhotoMetadata(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const metadata = {};
+  const driverDisplayName = cleanPhotoMetadataValue(source.driverDisplayName, 120).toUpperCase();
+  const driverVehicleType = cleanPhotoMetadataValue(source.driverVehicleType, 40).toUpperCase();
+  const driverCnhNumber = String(source.driverCnhNumber || "").replace(/\D/g, "").slice(0, 11);
+  const registrationMode = cleanPhotoMetadataValue(source.registrationMode, 40);
+
+  if (driverDisplayName) metadata.driverDisplayName = driverDisplayName;
+  if (driverVehicleType) metadata.driverVehicleType = driverVehicleType;
+  if (/^\d{11}$/.test(driverCnhNumber)) metadata.driverCnhNumber = driverCnhNumber;
+  if (registrationMode) metadata.registrationMode = registrationMode;
+
+  return metadata;
+}
+
+function buildPhotoMetadata(fields = {}) {
+  return {
+    driverDisplayName: String(fields.driverDisplayName || ""),
+    driverVehicleType: String(fields.driverVehicleType || ""),
+    driverCnhNumber: String(fields.driverCnhNumber || ""),
+    registrationMode: String(fields.registrationMode || ""),
+  };
+}
+
 async function exchangeCustomTokenForIdToken(customToken) {
   if (!FIREBASE_WEB_API_KEY) {
     throw new Error("FIREBASE_WEB_API_KEY nao configurada no backend.");
@@ -1063,6 +1092,7 @@ app.get("/admin/users/:uid/photos", requireMaster, async (req, res) => {
         generatedTela11: false,
         generationMode: "incomplete",
         updatedAtIso: "",
+        metadata: buildPhotoMetadata(),
         photos: {},
       });
     }
@@ -1082,6 +1112,7 @@ app.get("/admin/users/:uid/photos", requireMaster, async (req, res) => {
       exists: true,
       ...buildPhotoStatus(data),
       updatedAtIso: data.updatedAtIso || "",
+      metadata: buildPhotoMetadata(data),
       photos,
     });
   } catch (error) {
@@ -1251,9 +1282,11 @@ app.post("/photos/sync", requireAuth, async (req, res) => {
   try {
     const uid = req.user.uid;
     const photos = req.body?.photos || {};
+    const metadata = normalizePhotoMetadata(req.body?.metadata || {});
     console.log("[PHOTOS] sync_request", {
       uid,
       keys: Object.keys(photos || {}),
+      metadataKeys: Object.keys(metadata),
       hasPlaca: !!photos.placa,
       hasPlaca2: !!photos.placa2,
       hasTela6: !!photos.tela6,
@@ -1263,10 +1296,11 @@ app.post("/photos/sync", requireAuth, async (req, res) => {
     const photoRef = db.collection("userPhotos").doc(uid);
     const currentSnap = await photoRef.get();
     const current = currentSnap.exists ? currentSnap.data() || {} : {};
+    const nowIso = new Date().toISOString();
     const updates = {
       uid,
       phone: uid,
-      updatedAtIso: new Date().toISOString(),
+      updatedAtIso: nowIso,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
 
@@ -1279,6 +1313,12 @@ app.post("/photos/sync", requireAuth, async (req, res) => {
       updates[`${key}Bucket`] = uploaded.bucket;
     }
 
+    if (Object.keys(metadata).length > 0) {
+      Object.assign(updates, metadata, {
+        metadataUpdatedAtIso: nowIso,
+      });
+    }
+
     await photoRef.set(updates, { merge: true });
     const saved = { ...current, ...updates };
     console.log("[PHOTOS] sync_success", {
@@ -1289,6 +1329,7 @@ app.post("/photos/sync", requireAuth, async (req, res) => {
     return res.json({
       ok: true,
       ...buildPhotoStatus(saved),
+      metadata: buildPhotoMetadata(saved),
       updatedAtIso: saved.updatedAtIso || "",
     });
   } catch (error) {
@@ -1390,6 +1431,7 @@ app.get("/photos/me", requireAuth, async (req, res) => {
         generatedTela11: false,
         generationMode: "incomplete",
         updatedAtIso: "",
+        metadata: buildPhotoMetadata(),
         photos: {},
       });
     }
@@ -1417,6 +1459,7 @@ app.get("/photos/me", requireAuth, async (req, res) => {
       exists: true,
       ...buildPhotoStatus(data),
       updatedAtIso: data.updatedAtIso || "",
+      metadata: buildPhotoMetadata(data),
       photos,
     });
   } catch (error) {
