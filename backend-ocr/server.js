@@ -422,7 +422,16 @@ async function exchangeCustomTokenForIdToken(customToken) {
 }
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true });
+  const credentialsPath = String(process.env.GOOGLE_APPLICATION_CREDENTIALS || "").trim();
+  res.json({
+    ok: true,
+    firebaseProjectId: FIREBASE_PROJECT_ID,
+    hasFirebaseWebApiKey: !!FIREBASE_WEB_API_KEY,
+    hasFirebaseStorageBucket: !!process.env.FIREBASE_STORAGE_BUCKET,
+    hasGoogleCredentialsPath: !!credentialsPath,
+    googleCredentialsReady: process.env.GOOGLE_CREDENTIALS_READY === "1",
+    googleCredentialsProjectId: process.env.GOOGLE_CREDENTIALS_PROJECT_ID || "",
+  });
 });
 
 app.post("/auth/register", async (req, res) => {
