@@ -1,0 +1,434 @@
+COMO A IMAGEM DA TELA 6 ESTA SENDO TRATADA
+Data: 2026-06-05
+
+Objetivo deste arquivo:
+Mostrar, com trechos do codigo, como a imagem da Tela 6 e carregada,
+recarregada, baixada da nuvem, salva localmente e exibida apos o download.
+
+============================================================
+1) APOS LOGIN: COMECA O DOWNLOAD/CACHE SEM PRENDER A ENTRADA
+Arquivo: app/tela10.tsx
+============================================================
+
+Trecho principal:
+
+void hydrateCurrentUserPhotosFromCloud({ force: true }).catch((error) => {
+  console.log("LOGIN_FLOW", "cloud_hydrate_failed", error);
+});
+
+if (data.editMode) {
+  router.replace("/upload-fotos");
+  return;
+}
+
+router.replace("/tela6");
+
+Explicacao:
+- Depois da senha correta, o app chama hydrateCurrentUserPhotosFromCloud.
+- A chamada usa "void", entao o login nao fica esperando o download terminar.
+- O app navega para /tela6 normalmente.
+- Se o download/cache falhar, ele apenas registra no console e nao mostra mensagem publica.
+
+============================================================
+2) ONDE A TELA 6 BUSCA A IMAGEM SALVA
+Arquivo: lib/devStorage.ts
+============================================================
+
+Chave usada:
+
+export const KEY_TELA6 = "@DEV_TELA6_URI";
+
+Salvar imagem local da Tela 6:
+
+export async function setTela6Uri(uri: string | null) {
+  await persistImage(KEY_TELA6, uri, "tela6");
+}
+
+Ler imagem local da Tela 6:
+
+export async function getTela6Uri() {
+  const uri = await getPersistedImage(KEY_TELA6);
+  if (uri) {
+    return uri;
+  }
+
+  const LOCAL_LOGIN_PHOTOS_DIR =
+    `${FileSystem.documentDirectory}salva-localmente-placas-e-telas/`;
+  const extensions = ["webp", "jpg", "jpeg", "png"];
+
+  for (const ext of extensions) {
+    const candidate = `${LOCAL_LOGIN_PHOTOS_DIR}tela6.${ext}`;
+
+    try {
+      const info = await FileSystem.getInfoAsync(candidate);
+      if (info.exists) {
+        await AsyncStorage.setItem(KEY_TELA6, candidate);
+        console.log("[STORAGE] getTela6Uri: chave recuperada do disco:", candidate);
+        return candidate;
+      }
+    } catch {
+      // Continua tentando a proxima extensao.
+    }
+  }
+
+  return null;
+}
+
+Explicacao:
+- A Tela 6 nao procura diretamente no assets primeiro.
+- Ela pergunta ao storage: "existe uma URI salva para KEY_TELA6?"
+- Se existir arquivo local valido, usa esse arquivo.
+- Se a chave do AsyncStorage sumiu, procura tela6.webp/jpg/jpeg/png direto
+  na pasta local e reconstrui KEY_TELA6.
+- Se nao encontrar no disco, pode tentar recuperar da nuvem.
+
+============================================================
+3) COMO A NUVEM BAIXA E SALVA A TELA 6 LOCALMENTE
+Arquivo: lib/devStorage.ts
+============================================================
+
+Trecho principal:
+
+await Promise.all([
+  writeCloudPhotoToManagedFile(KEY_PLACA, "placa", photos.placa),
+  writeCloudPhotoToManagedFile(KEY_PLACA_2, "placa2", photos.placa2),
+  writeCloudPhotoToManagedFile(KEY_TELA6, "tela6", photos.tela6),
+  writeCloudPhotoToManagedFile(KEY_TELA11, "tela11", photos.tela11),
+]);
+
+Explicacao:
+- photos.tela6 vem da rota /photos/me.
+- A funcao writeCloudPhotoToManagedFile recebe KEY_TELA6 e o nome base "tela6".
+- Isso faz a imagem da nuvem virar arquivo local no dispositivo.
+- Depois salva no AsyncStorage a URI local desse arquivo.
+
+============================================================
+4) PASTAS LOCAIS USADAS PARA CACHE
+Arquivo: lib/photoCache.ts
+============================================================
+
+Trecho principal:
+
+const SECURE_IMAGES_DIR = `${FileSystem.documentDirectory}.secure-dev-images/`;
+const LEGACY_IMAGES_DIR = `${FileSystem.documentDirectory}dev-images/`;
+const LOCAL_LOGIN_PHOTOS_DIR =
+  `${FileSystem.documentDirectory}salva-localmente-placas-e-telas/`;
+
+Explicacao:
+- Imagens escolhidas no upload sao copiadas para .secure-dev-images.
+- Imagens vindas da nuvem no login/cache sao salvas em:
+  salva-localmente-placas-e-telas/
+- dev-images e pasta antiga/legada; se achar arquivo antigo, o codigo migra para a pasta segura.
+
+============================================================
+5) COMO UM DATA URL DA NUVEM VIRA ARQUIVO LOCAL
+Arquivo: lib/photoCache.ts
+============================================================
+
+Trecho principal:
+
+async function writeDataUrlToManagedFile(
+  key: string,
+  fileBaseName: string,
+  dataUrl: string
+) {
+  if (!dataUrl || !dataUrl.startsWith("data:image/")) return;
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return;
+
+  await ensureDevImagesDir();
+  const mime = match[1];
+  const base64 = match[2];
+  const ext = mime.includes("webp") ? "webp" : "jpg";
+  const destinationUri = getLocalLoginPhotoDestinationUri(fileBaseName, ext);
+
+  await FileSystem.writeAsStringAsync(destinationUri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  await AsyncStorage.setItem(key, destinationUri);
+}
+
+Explicacao:
+- Se a nuvem retorna "data:image/...;base64,...", o app extrai o base64.
+- O arquivo e gravado fisicamente no dispositivo.
+- Para Tela 6, o nome base e "tela6", entao pode virar tela6.webp, tela6.jpg etc.
+- Depois AsyncStorage salva KEY_TELA6 apontando para esse arquivo local.
+
+Observacao:
+- No codigo real, a extensao tambem trata svg/png/webp/jpg.
+- O trecho acima foi encurtado para mostrar a parte essencial.
+
+============================================================
+6) COMO UMA URL REMOTA DA NUVEM VIRA ARQUIVO LOCAL
+Arquivo: lib/photoCache.ts
+============================================================
+
+Trecho principal:
+
+async function downloadRemoteImageToManagedFile(
+  key: string,
+  fileBaseName: string,
+  remoteUri: string
+) {
+  const uri = remoteUri.trim();
+  if (!/^https?:\/\//i.test(uri)) return;
+
+  await ensureDevImagesDir();
+  const destinationUri =
+    getLocalLoginPhotoDestinationUri(fileBaseName, getImageExtension(uri));
+
+  await FileSystem.downloadAsync(uri, destinationUri);
+  await AsyncStorage.setItem(key, destinationUri);
+}
+
+Explicacao:
+- Se a nuvem retornar uma URL http/https, o app faz download.
+- O arquivo baixado e salvo em salva-localmente-placas-e-telas/.
+- Para Tela 6, o fileBaseName e "tela6".
+- Depois KEY_TELA6 passa a apontar para o arquivo local baixado.
+
+============================================================
+7) FUNCAO QUE DECIDE SE E DATA URL, URL REMOTA OU FILE LOCAL
+Arquivo: lib/photoCache.ts
+============================================================
+
+Trecho principal:
+
+export async function writeCloudPhotoToManagedFile(
+  key: string,
+  fileBaseName: string,
+  cloudValue?: string
+) {
+  const value = cloudValue?.trim();
+  if (!value) return;
+
+  if (value.startsWith("data:image/")) {
+    await writeDataUrlToManagedFile(key, fileBaseName, value);
+    return;
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    await downloadRemoteImageToManagedFile(key, fileBaseName, value);
+    return;
+  }
+
+  if (value.startsWith("file://")) {
+    await persistImage(key, value, fileBaseName);
+  }
+}
+
+Explicacao:
+- Esta e a funcao central do download/cache vindo da nuvem.
+- Ela aceita tres formatos:
+  1. data:image/... base64
+  2. URL http/https
+  3. file:// local
+- Para Tela 6, sempre recebe:
+  key = KEY_TELA6
+  fileBaseName = "tela6"
+
+============================================================
+8) COMO A TELA 6 CARREGA E RECARREGA AO VOLTAR PARA ELA
+Arquivo: app/tela6.tsx
+============================================================
+
+Trecho principal:
+
+useFocusEffect(
+  useCallback(() => {
+    let active = true;
+
+    async function loadTela6Image() {
+      const savedUri = await getTela6Uri();
+
+      if (!active) {
+        return;
+      }
+
+      setCloudAttempted(false);
+
+      if (savedUri) {
+        lastKnownTela6Uri = savedUri;
+        setUri(savedUri);
+        setSourceRevision((current) => current + 1);
+        return;
+      }
+
+      if (lastKnownTela6Uri) {
+        setUri(lastKnownTela6Uri);
+      }
+
+      try {
+        await hydrateCurrentUserPhotosFromCloud({ force: true });
+      } catch {}
+
+      const hydratedUri = await getTela6Uri();
+      if (active) {
+        setCloudAttempted(true);
+        if (hydratedUri) {
+          lastKnownTela6Uri = hydratedUri;
+          setUri(hydratedUri);
+          setSourceRevision((current) => current + 1);
+        } else if (!lastKnownTela6Uri) {
+          setUri(null);
+        }
+      }
+    }
+
+    void loadTela6Image();
+
+    return () => {
+      active = false;
+    };
+  }, [])
+);
+
+Explicacao:
+- useFocusEffect roda toda vez que a Tela 6 entra em foco.
+- Primeiro tenta getTela6Uri(), ou seja, arquivo local salvo.
+- Se encontrar savedUri:
+  - guarda em lastKnownTela6Uri
+  - coloca setUri(savedUri)
+  - aumenta sourceRevision para forcar recarregamento da imagem
+  - nao baixa da nuvem nesse momento
+- Se nao encontrar arquivo local, mas existir lastKnownTela6Uri em memoria:
+  - mostra a ultima imagem conhecida enquanto tenta recuperar
+- Depois tenta hydrateCurrentUserPhotosFromCloud({ force: true }).
+- Apos o download/cache, chama getTela6Uri() de novo.
+- Se agora existir hydratedUri:
+  - salva como lastKnownTela6Uri
+  - setUri(hydratedUri)
+  - incrementa sourceRevision para a imagem renderizar de novo
+
+============================================================
+9) COMO A TELA 6 SE RECUPERA SE A IMAGEM DER ERRO
+Arquivo: app/tela6.tsx
+============================================================
+
+Trecho principal:
+
+async function recoverTela6FromCloud() {
+  if (cloudAttempted) {
+    if (!lastKnownTela6Uri) {
+      setUri(null);
+    }
+    return;
+  }
+
+  setCloudAttempted(true);
+  try {
+    await hydrateCurrentUserPhotosFromCloud({ force: true });
+  } catch {}
+  const recoveredUri = await getTela6Uri();
+  if (recoveredUri) {
+    lastKnownTela6Uri = recoveredUri;
+    setUri(recoveredUri);
+    setSourceRevision((current) => current + 1);
+  } else if (!lastKnownTela6Uri) {
+    setUri(null);
+  }
+}
+
+Explicacao:
+- Se o arquivo local falhar na exibicao, onError chama recoverTela6FromCloud.
+- Ele tenta baixar/cachear da nuvem novamente.
+- Se encontrar recoveredUri, exibe esse novo arquivo local.
+- cloudAttempted evita loop infinito de tentar baixar sem parar.
+
+============================================================
+10) COMO A IMAGEM E EXIBIDA DEPOIS DO DOWNLOAD
+Arquivo: app/tela6.tsx
+============================================================
+
+Trecho principal:
+
+const imageSource = uri ? { uri } : DEFAULT_TELA6_IMAGE;
+
+return (
+  <ExpoImage
+    key={`${uri || "fallback"}-${sourceRevision}`}
+    source={imageSource}
+    onError={uri ? recoverTela6FromCloud : undefined}
+    style={styles.bg}
+    contentFit="cover"
+    cachePolicy="none"
+  />
+);
+
+Explicacao:
+- Se uri existe, mostra a imagem local baixada/salva.
+- Se uri nao existe, usa o asset fallback:
+  assets/images/tela6.jpg
+- A key usa uri + sourceRevision para forcar remount/reload da imagem quando muda.
+- cachePolicy="none" evita que o ExpoImage segure uma versao antiga em cache visual.
+- onError so fica ativo quando existe uri local; se o fallback asset falhar, nao tenta nuvem em loop.
+
+============================================================
+11) COMO O UPLOAD DA TELA 6 E OTIMIZADO EM WEBP
+Arquivo: app/upload-fotos.tsx
+============================================================
+
+Trecho principal:
+
+async function prepareUploadUri(slot: SlotKey, uri: string) {
+  if (slot !== "tela6") {
+    return uri;
+  }
+
+  const result = await manipulateAsync(uri, [], {
+    compress: 0.72,
+    format: SaveFormat.WEBP,
+  });
+  return result.uri;
+}
+
+Uso no upload:
+
+const uri = await prepareUploadUri(slot, selectedUri);
+
+if (slot === "tela6") {
+  await setTela6Uri(uri);
+  setTela6UriState(uri);
+}
+
+Explicacao:
+- Apenas Tela 6 e convertida para WebP no upload.
+- Depois setTela6Uri salva localmente essa imagem.
+- Em seguida o fluxo de sync envia para nuvem.
+- Quando logar novamente ou recuperar da nuvem, o cache local pode voltar como tela6.webp.
+
+============================================================
+RESUMO DO FLUXO COMPLETO DA TELA 6
+============================================================
+
+1. Login correto:
+   app/tela10.tsx chama hydrateCurrentUserPhotosFromCloud em segundo plano.
+
+2. Download/cache:
+   lib/devStorage.ts busca /photos/me e chama:
+   writeCloudPhotoToManagedFile(KEY_TELA6, "tela6", photos.tela6).
+
+3. Salvamento local:
+   lib/photoCache.ts grava a imagem em:
+   FileSystem.documentDirectory/salva-localmente-placas-e-telas/tela6.ext
+   e salva KEY_TELA6 no AsyncStorage.
+
+4. Entrada/reentrada na Tela 6:
+   app/tela6.tsx usa useFocusEffect e chama getTela6Uri().
+
+5. Exibicao:
+   Se KEY_TELA6 aponta para arquivo local valido:
+   ExpoImage mostra source={{ uri: arquivoLocal }}.
+   Se KEY_TELA6 sumiu mas tela6.webp/jpg/jpeg/png ainda existe no disco:
+   getTela6Uri reconstrui a chave e exibe o arquivo local.
+
+6. Recarregamento:
+   sourceRevision aumenta para forcar a imagem a recarregar.
+
+7. Recuperacao:
+   Se a imagem local falhar, onError tenta nuvem uma vez.
+   cloudAttempted impede loop infinito.
+
+8. Fallback:
+   Se nao houver imagem local nem nuvem disponivel, mostra:
+   assets/images/tela6.jpg

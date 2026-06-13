@@ -2,9 +2,17 @@ import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Audio } from "expo-av";
-import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Animated, Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
+import { router } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { extractOccurrenceFromText } from "../lib/occurrenceParser";
 import { getCurrentAdminAccess, setScannedBrCode, setScannedOccurrence } from "../lib/devStorage";
 
@@ -13,38 +21,75 @@ const { width, height } = Dimensions.get("window");
 export default function Tela8() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
-  const [scannerNativoDisponivel, setScannerNativoDisponivel] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [permissionLoadingTimedOut, setPermissionLoadingTimedOut] = useState(false);
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [showSecondReadModal, setShowSecondReadModal] = useState(false);
   const scanY = useRef(new Animated.Value(0)).current;
   const beepSoundRef = useRef<Audio.Sound | null>(null);
   const scanLockRef = useRef(false);
-  const lastScanRef = useRef("");
-  const successfulReadCountRef = useRef(0);
+  const requestedPermissionRef = useRef(false);
+
+  console.log("[TELA8] render - permission:", permission?.granted, "cameraReady:", cameraReady);
 
   useEffect(() => {
-    if (!permission) return;
-
-    if (!permission.granted) {
-      requestPermission();
+    console.log("[TELA8] permission mudou:", JSON.stringify(permission));
+    if (permission == null) {
+      if (!requestedPermissionRef.current) {
+        requestedPermissionRef.current = true;
+        requestPermission().catch(() => undefined);
+      }
       return;
     }
 
-    Animated.loop(
+    setPermissionLoadingTimedOut(false);
+
+    if (!permission.granted && permission.canAskAgain) {
+      requestPermission().catch(() => undefined);
+    }
+  }, [permission, requestPermission]);
+
+  useEffect(() => {
+    if (cameraReady) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setCameraReady(true);
+    }, 6000);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [cameraReady]);
+
+  useEffect(() => {
+    if (!cameraReady) {
+      return;
+    }
+
+    scanY.setValue(0);
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(scanY, {
           toValue: height * 0.55,
-          duration: 4500, // ✅ mais lento (ajuste aqui)
+          duration: 4800,
           useNativeDriver: true,
         }),
         Animated.timing(scanY, {
           toValue: 0,
-          duration: 4500, // ✅ mais lento (ajuste aqui)
+          duration: 1,
           useNativeDriver: true,
         }),
       ])
-    ).start();
-  }, [permission?.granted]);
+    );
+
+    loop.start();
+
+    return () => {
+      loop.stop();
+    };
+  }, [cameraReady, scanY]);
 
   useEffect(() => {
     let mounted = true;
@@ -72,91 +117,161 @@ export default function Tela8() {
     };
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      const subscription = CameraView.onModernBarcodeScanned((event) => {
-        handleBarcodeScanned({
-          data: event.data,
-          type: event.type,
-        }).catch(() => undefined);
-      });
+  if (permission == null) {
+    return (
+      <View style={styles.screen}>
+          <CameraView
+          style={styles.camera}
+          enableTorch={torchEnabled}
+          barcodeScannerSettings={{
+            barcodeTypes: ["qr"],
+          }}
+          onCameraReady={() => {
+            console.log("[TELA8] onCameraReady disparou");
+            setCameraReady(true);
+          }}
+          onBarcodeScanned={handleBarcodeScanned}
+        />
 
-      setScannerNativoDisponivel(true);
+        {!cameraReady ? (
+          <View style={styles.cameraLoadingOverlay}>
+            {permissionLoadingTimedOut ? (
+              <>
+                <MaterialCommunityIcons name="camera-off-outline" size={44} color="#ff5a36" />
+                <Text style={styles.cameraLoadingTitle}>Camera demorando para abrir</Text>
+                <Text style={styles.cameraLoadingText}>
+                  Toque abaixo para tentar liberar a camera e continuar.
+                </Text>
+                <Pressable
+                  style={styles.permissionButton}
+                  onPress={() => {
+                    requestedPermissionRef.current = true;
+                    requestPermission().catch(() => undefined);
+                  }}
+                >
+                  <Text style={styles.permissionButtonText}>Tentar novamente</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <ActivityIndicator size="large" color="#ff5a36" />
+                <Text style={styles.cameraLoadingTitle}>Abrindo camera...</Text>
+                <Text style={styles.cameraLoadingText}>Estamos preparando o scanner.</Text>
+              </>
+            )}
+          </View>
+        ) : (
+          <>
+            <Animated.View style={[styles.scanLine, { transform: [{ translateY: scanY }] }]}>
+              <View style={styles.scanLineBase} />
+              <View style={styles.scanLineCore} />
+            </Animated.View>
 
-      return () => {
-        subscription.remove();
-      };
-    }, [scanned])
-  );
+            <Pressable onPress={() => router.push("/tela2")} style={styles.backArea}>
+              <MaterialIcons name="arrow-back" size={26} color="#fff" />
+            </Pressable>
 
-  if (!permission) return <View />;
-  if (!permission.granted) return <View style={{ flex: 1 }} />;
+            <Text style={styles.title}>Escanear</Text>
+
+            <Pressable style={styles.editArea} onLongPress={abrirPainelOperacional} delayLongPress={2500}>
+              <MaterialIcons name="edit" size={26} color="#fff" />
+            </Pressable>
+
+            <Pressable onPress={alternarLanterna} style={styles.flashArea}>
+              <MaterialIcons
+                name="flashlight-on"
+                size={28}
+                color="#fff"
+                style={{ opacity: torchEnabled ? 1 : 0.72 }}
+              />
+              <Text style={styles.flashText}>
+                {torchEnabled ? "Desligar lanterna" : "Ligar lanterna"}
+              </Text>
+            </Pressable>
+
+            <View style={styles.bottomTextArea}>
+              <Text
+                numberOfLines={1}
+                style={styles.bigText}
+              >
+                Procurando pelo código...
+              </Text>
+              <Text style={styles.smallText}>
+                Apontar para o código de barras para escanear e atualizar o status do pedido
+              </Text>
+            </View>
+          </>
+        )}
+      </View>
+    );
+  }
+
+  if (!permission.granted) {
+    return (
+      <View style={styles.loadingScreen}>
+        <MaterialCommunityIcons name="camera-off-outline" size={44} color="#ff5a36" />
+        <Text style={styles.loadingTitle}>Permissao da camera necessaria</Text>
+        <Text style={styles.loadingText}>
+          Toque abaixo para liberar a camera e continuar o escaneamento.
+        </Text>
+        <Pressable
+          style={styles.permissionButton}
+          onPress={() => {
+            requestPermission().catch(() => undefined);
+          }}
+        >
+          <Text style={styles.permissionButtonText}>Liberar camera</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push("/tela2")} style={styles.permissionBackButton}>
+          <Text style={styles.permissionBackButtonText}>Voltar</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   async function handleBarcodeScanned({ data, type }: { data: string; type: string }) {
     const normalizedData = String(data || "").trim();
-    if (scanned || scanLockRef.current || !normalizedData) {
-      return;
-    }
-    if (successfulReadCountRef.current >= 1) {
-      setShowSecondReadModal(true);
+    if (scanLockRef.current || !normalizedData) {
       return;
     }
     scanLockRef.current = true;
-    if (lastScanRef.current === normalizedData) {
-      setTimeout(() => {
-        scanLockRef.current = false;
-      }, 700);
-      return;
-    }
-    lastScanRef.current = normalizedData;
 
-    setScanned(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-      () => undefined
-    );
-    const sound = beepSoundRef.current;
-    if (sound) {
-      try {
-        await sound.setPositionAsync(0);
-        await sound.playAsync();
-      } catch {
-        // Ignore audio failures and keep the scan flow working.
+    try {
+      setScanned(true);
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => undefined
+      );
+      const sound = beepSoundRef.current;
+      if (sound) {
+        try {
+          await sound.setPositionAsync(0);
+          await sound.playAsync();
+        } catch {
+          // Ignore audio failures and keep the scan flow working.
+        }
       }
-    }
 
-    const parsedScan = extractOccurrenceFromText(normalizedData);
+      const parsedScan = extractOccurrenceFromText(normalizedData);
 
-    if (!parsedScan.codigo) {
+      if (!parsedScan.codigo) {
+        return;
+      }
+
+      await setScannedBrCode(parsedScan.codigo);
+      await setScannedOccurrence({
+        codigo: parsedScan.codigo,
+        endereco: parsedScan.endereco,
+        pessoa: parsedScan.pessoa,
+        raw: normalizedData,
+        scanType: type,
+      });
+    } finally {
       setScanned(false);
       setTimeout(() => {
         scanLockRef.current = false;
-      }, 450);
-      return;
+      }, 250);
     }
-
-    await setScannedBrCode(parsedScan.codigo);
-    await setScannedOccurrence({
-      codigo: parsedScan.codigo,
-      endereco: parsedScan.endereco,
-      pessoa: parsedScan.pessoa,
-      raw: normalizedData,
-      scanType: type,
-    });
-    successfulReadCountRef.current += 1;
-
-    Alert.alert(
-      parsedScan.codigo,
-      "Nao foi possivel adicionar esse pacote",
-      [{
-        text: "OK",
-        onPress: () => {
-          setScanned(false);
-          setTimeout(() => {
-            scanLockRef.current = false;
-          }, 250);
-        },
-      }]
-    );
   }
 
   function alternarLanterna() {
@@ -175,18 +290,35 @@ export default function Tela8() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={styles.screen}>
       <CameraView
-        style={{ flex: 1 }}
+        style={styles.camera}
         enableTorch={torchEnabled}
         barcodeScannerSettings={{
           barcodeTypes: ["qr"],
         }}
+        onCameraReady={() => {
+          console.log("[TELA8] onCameraReady disparou");
+          setCameraReady(true);
+        }}
         onBarcodeScanned={handleBarcodeScanned}
       />
 
+      {!cameraReady ? (
+        <View style={styles.cameraLoadingOverlay}>
+          <ActivityIndicator size="large" color="#ff5a36" />
+          <Text style={styles.cameraLoadingTitle}>Abrindo camera...</Text>
+          <Text style={styles.cameraLoadingText}>
+            Em alguns aparelhos isso pode levar alguns segundos.
+          </Text>
+        </View>
+      ) : null}
+
       {/* Linha vermelha animada */}
-      <Animated.View style={[styles.scanLine, { transform: [{ translateY: scanY }] }]} />
+      <Animated.View style={[styles.scanLine, { transform: [{ translateY: scanY }] }]}>
+        <View style={styles.scanLineBase} />
+        <View style={styles.scanLineCore} />
+      </Animated.View>
 
       {/* Top bar */}
       <Pressable onPress={() => router.push("/tela2")} style={styles.backArea}>
@@ -205,7 +337,12 @@ export default function Tela8() {
         onPress={alternarLanterna}
         style={styles.flashArea}
       >
-        <MaterialCommunityIcons name="flashlight" size={26} color="#fff" />
+        <MaterialIcons
+          name="flashlight-on"
+          size={28}
+          color="#fff"
+          style={{ opacity: torchEnabled ? 1 : 0.72 }}
+        />
         <Text style={styles.flashText}>
           {torchEnabled ? "Desligar lanterna" : "Ligar lanterna"}
         </Text>
@@ -213,9 +350,14 @@ export default function Tela8() {
 
       {/* Textos de baixo */}
       <View style={styles.bottomTextArea}>
-        <Text style={styles.bigText}>Procurando pelo código...</Text>
+        <Text
+          numberOfLines={1}
+          style={styles.bigText}
+        >
+          Procurando pelo código...
+        </Text>
         <Text style={styles.smallText}>
-          Aponte para um QR com BR, nome e endereco. Texto puro na camera nao e suportado aqui.
+          Apontar para o código de barras para escanear e atualizar o status do pedido
         </Text>
       </View>
 
@@ -244,7 +386,6 @@ export default function Tela8() {
                   setShowSecondReadModal(false);
                   setScanned(false);
                   scanLockRef.current = false;
-                  lastScanRef.current = "";
                 }}
               >
                 <MaterialIcons name="refresh" size={22} color="#d96a3a" />
@@ -259,14 +400,116 @@ export default function Tela8() {
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: "#050608",
+  },
+
+  camera: {
+    flex: 1,
+  },
+
+  loadingScreen: {
+    flex: 1,
+    backgroundColor: "#050608",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+
+  loadingTitle: {
+    marginTop: 16,
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+
+  loadingText: {
+    marginTop: 10,
+    color: "#c8ccd3",
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: "center",
+  },
+
+  permissionButton: {
+    marginTop: 20,
+    minWidth: 190,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    backgroundColor: "#ff5a36",
+  },
+
+  permissionButtonText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+
+  permissionBackButton: {
+    marginTop: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+
+  permissionBackButtonText: {
+    color: "#d8dce3",
+    fontSize: 15,
+    fontWeight: "500",
+  },
+
+  cameraLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(5,6,8,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+
+  cameraLoadingTitle: {
+    marginTop: 16,
+    color: "#ffffff",
+    fontSize: 21,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+
+  cameraLoadingText: {
+    marginTop: 10,
+    color: "#c8ccd3",
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: "center",
+  },
+
   scanLine: {
     position: "absolute",
     top: height * 0.25,
     left: width * 0.08,
     width: width * 0.84,
     height: 2,
-    backgroundColor: "red",
-    opacity: 0.85,
+  },
+
+  scanLineBase: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: "#ff4b4b",
+    opacity: 0.18,
+  },
+
+  scanLineCore: {
+    position: "absolute",
+    left: "12%",
+    right: "12%",
+    height: 1,
+    backgroundColor: "#ff5a5a",
+    opacity: 0.56,
   },
 
   backArea: {
@@ -300,6 +543,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     opacity: 0.95,
+    zIndex: 25,
+    elevation: 25,
   },
 
   flashText: {
@@ -318,9 +563,12 @@ const styles = StyleSheet.create({
 
   bigText: {
     color: "#fff",
-    fontSize: 22,
-    fontWeight: "400",
+    fontSize: 20,
+    fontWeight: "500",
     marginBottom: 10,
+    textAlign: "center",
+    flexShrink: 1,
+    letterSpacing: 0,
   },
 
   smallText: {

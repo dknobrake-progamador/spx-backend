@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Facial Verification</title>
+  <style>
+    :root {
+      --green: #11d870;
+      --red: #ef5a36;
+      --warn: #ff3048;
+      --text: #505866;
+      --line: #f0f2f6;
+      --bg: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+    }
+
+    .screen {
+      min-height: 100vh;
+      background: #fff;
+    }
+
+    .topbar {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+      font-weight: 600;
+      color: #515966;
+    }
+
+    .back {
+      border: 0;
+      background: transparent;
+      padding: 0;
+      font-size: 22px;
+      line-height: 1;
+      color: #76808e;
+      cursor: pointer;
+    }
+
+    .wrap {
+      padding-top: 26px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .frame-area {
+      position: relative;
+      width: min(86vw, 252px);
+      height: min(86vw, 252px);
+    }
+
+    .ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 5px solid var(--green);
+      background: radial-gradient(circle at 52% 38%, #b8b8b8 0%, #9d9d9d 45%, #d4d4d4 100%);
+    }
+
+    .frame-area.captured .ring {
+      border-color: transparent;
+    }
+
+    .frame-area.captured .mask {
+      display: none;
+    }
+
+    video,
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      background: transparent;
+    }
+
+    canvas {
+      display: none;
+    }
+
+    .mask {
+      position: absolute;
+      inset: 5px;
+      border-radius: 50%;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 4;
+    }
+
+    .mask svg {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      shape-rendering: geometricPrecision;
+      z-index: 4;
+    }
+
+    .document-guide {
+      position: absolute;
+      left: 23%;
+      bottom: 0%;
+      width: 27%;
+      height: 17%;
+      border-radius: 2px;
+      background: rgba(196, 225, 214, .92);
+      box-shadow: 0 0 0 1px rgba(42, 105, 91, .45), 0 4px 10px rgba(0, 0, 0, .18);
+      transform: rotate(-1deg);
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .document-guide::before {
+      display: none;
+    }
+
+    .document-guide::after {
+      display: none;
+    }
+
+    .document-image {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 1;
+    }
+
+    .doc-photo {
+      position: absolute;
+      left: 14%;
+      top: 39%;
+      width: 28%;
+      height: 44%;
+      border-radius: 1px;
+      overflow: hidden;
+      background: rgba(255,255,255,.2);
+      z-index: 2;
+    }
+
+    .doc-photo video {
+      width: 120%;
+      height: 120%;
+      left: -10%;
+      top: -8%;
+      object-fit: cover;
+      opacity: .96;
+    }
+
+    .doc-loader {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #6d7580;
+    }
+
+    .doc-loader input {
+      max-width: 220px;
+      font-size: 11px;
+    }
+
+    .status {
+      margin-top: 18px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 8px;
+      color: var(--warn);
+      font-size: 17px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 1.1;
+      max-width: 255px;
+    }
+
+    .status.ok {
+      color: var(--green);
+    }
+
+    .status svg {
+      flex: 0 0 auto;
+      width: 19px;
+      height: 19px;
+      margin-top: 2px;
+    }
+
+    .subtext {
+      margin-top: 10px;
+      color: #929aa5;
+      font-size: 12px;
+      text-align: center;
+      max-width: 260px;
+      line-height: 1.35;
+      min-height: 32px;
+    }
+
+    .actions {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      background: #1c222d;
+      color: #fff;
+    }
+
+    .btn.ghost {
+      background: #eff2f6;
+      color: #5e6672;
+      display: none;
+    }
+
+    .result {
+      margin-top: 18px;
+      width: min(64vw, 180px);
+      height: min(64vw, 180px);
+      border-radius: 18px;
+      overflow: hidden;
+      display: none;
+      border: 1px solid #edf0f4;
+      background: #f5f7fa;
+    }
+
+    .result img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body>
+  <div class="screen">
+    <div class="topbar">
+      <button class="back" type="button" aria-label="Voltar">&#8592;</button>
+      <span>Facial Verification</span>
+    </div>
+
+    <div class="wrap">
+      <div class="frame-area">
+        <div class="ring">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="capture"></canvas>
+        </div>
+
+        <div class="mask">
+          <div class="document-guide" aria-hidden="true">
+            <img id="documentImage" class="document-image" src="facial/cnh facial.jpg" alt="">
+            <div class="doc-photo">
+              <video id="docMiniVideo" autoplay playsinline muted></video>
+            </div>
+          </div>
+
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <path
+              d="M14.5 90
+                 C25.5 84.1 33.7 78.7 36 70.7
+                 C36.8 67.8 34.6 65.6 32.7 62.4
+                 C30.3 58.4 29.5 53.8 29.4 50.3
+                 C26.4 48.4 25.2 44.7 25.8 40.6
+                 C26.3 37.3 28.4 35.1 31.5 34
+                 C30.7 29.1 30.8 23.9 32.8 19.5
+                 C35.8 12.8 42.1 9.3 50 9.3
+                 C57.9 9.3 64.2 12.8 67.2 19.5
+                 C69.2 23.9 69.3 29.1 68.5 34
+                 C71.6 35.1 73.7 37.3 74.2 40.6
+                 C74.8 44.7 73.6 48.4 70.6 50.3
+                 C70.5 53.8 69.7 58.4 67.3 62.4
+                 C65.4 65.6 63.2 67.8 64 70.7
+                 C66.3 78.7 74.5 84.1 85.5 90"
+              fill="none"
+              stroke="#ef5a36"
+              stroke-width="1.35"
+              stroke-linecap="round"
+              stroke-linejoin="round"></path>
+          </svg>
+        </div>
+      </div>
+
+      <div id="status" class="status">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" fill="#ff3048"></circle>
+          <rect x="11" y="6" width="2" height="8" rx="1" fill="#fff"></rect>
+          <circle cx="12" cy="17.2" r="1.2" fill="#fff"></circle>
+        </svg>
+        <span id="statusText">Por favor coloque seu rosto<br>na moldura</span>
+      </div>
+
+      <div id="subtext" class="subtext">Permita o acesso à câmera e mantenha o rosto centralizado.</div>
+
+      <div class="actions">
+        <button id="captureBtn" class="btn primary" type="button">Capturar foto</button>
+        <button id="retryBtn" class="btn ghost" type="button">Refazer</button>
+      </div>
+
+      <div id="result" class="result">
+        <img id="resultImg" alt="Foto capturada">
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
+  <script>
+    const video = document.getElementById("video");
+    const docMiniVideo = document.getElementById("docMiniVideo");
+    const documentImage = document.getElementById("documentImage");
+    const canvas = document.getElementById("capture");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const captureBtn = document.getElementById("captureBtn");
+    const retryBtn = document.getElementById("retryBtn");
+    const result = document.getElementById("result");
+    const resultImg = document.getElementById("resultImg");
+    const status = document.getElementById("status");
+    const statusText = document.getElementById("statusText");
+    const subtext = document.getElementById("subtext");
+    const frameArea = document.querySelector(".frame-area");
+    subtext.textContent = "Centralize o rosto. O documento verde sera aplicado como filtro.";
+
+    let stream = null;
+    let detector = null;
+    let mediaPipeDetector = null;
+    let mediaPipeFace = null;
+    let mediaPipeBusy = false;
+    let rafId = null;
+    let stable = 0;
+    let locked = false;
+
+    function setWarn(text, detail) {
+      status.classList.remove("ok");
+      statusText.innerHTML = text;
+      status.querySelector("circle").setAttribute("fill", "#ff3048");
+      if (detail) subtext.textContent = detail;
+    }
+
+    function setOk(text, detail) {
+      status.classList.add("ok");
+      statusText.innerHTML = text;
+      status.querySelector("circle").setAttribute("fill", "#11d870");
+      if (detail) subtext.textContent = detail;
+    }
+
+    async function startCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 720 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+
+        video.srcObject = stream;
+        docMiniVideo.srcObject = stream;
+        await video.play();
+        await docMiniVideo.play();
+
+        if ("FaceDetector" in window) {
+          detector = new FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+          subtext.textContent = "Detector automatico ativo. Centralize o rosto para capturar.";
+        } else if (setupMediaPipe()) {
+          subtext.textContent = "Detector automatico ativo. Centralize o rosto para capturar.";
+        } else {
+          subtext.textContent = "Detector automatico indisponivel. Use o botao Capturar foto.";
+        }
+
+        monitor();
+      } catch (err) {
+        setWarn("Não foi possível abrir<br>a câmera", "Se necessário, permita a câmera no navegador.");
+        captureBtn.disabled = true;
+      }
+    }
+
+    function setupMediaPipe() {
+      if (!window.FaceDetection) return false;
+
+      mediaPipeDetector = new FaceDetection({
+        locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
+      });
+
+      mediaPipeDetector.setOptions({
+        model: "short",
+        minDetectionConfidence: 0.65
+      });
+
+      mediaPipeDetector.onResults(results => {
+        const detection = results.detections && results.detections[0];
+        const box = detection && detection.locationData && detection.locationData.relativeBoundingBox;
+
+        if (box && video.videoWidth && video.videoHeight) {
+          mediaPipeFace = {
+            x: box.xMin * video.videoWidth,
+            y: box.yMin * video.videoHeight,
+            width: box.width * video.videoWidth,
+            height: box.height * video.videoHeight
+          };
+        } else {
+          mediaPipeFace = null;
+        }
+
+        mediaPipeBusy = false;
+      });
+
+      return true;
+    }
+
+    async function readFace() {
+      if (detector) {
+        try {
+          const faces = await detector.detect(video);
+          if (!faces.length) return null;
+          const box = faces[0].boundingBox;
+          return {
+            x: box.x,
+            y: box.y,
+            width: box.width,
+            height: box.height
+          };
+        } catch {
+          return null;
+        }
+      }
+
+      if (mediaPipeDetector && !mediaPipeBusy && video.videoWidth) {
+        mediaPipeBusy = true;
+        mediaPipeDetector.send({ image: video }).catch(() => {
+          mediaPipeBusy = false;
+          mediaPipeFace = null;
+        });
+      }
+
+      return mediaPipeFace;
+    }
+
+    function faceInside(face) {
+      if (!face || !video.videoWidth || !video.videoHeight) return false;
+      const cx = (face.x + face.width / 2) / video.videoWidth;
+      const cy = (face.y + face.height / 2) / video.videoHeight;
+      const fw = face.width / video.videoWidth;
+      const fh = face.height / video.videoHeight;
+
+      const centered = cx > 0.39 && cx < 0.61 && cy > 0.39 && cy < 0.59;
+      const sized = fw > 0.24 && fw < 0.58 && fh > 0.34 && fh < 0.74;
+      return centered && sized;
+    }
+
+    function roundedRectPath(target, x, y, width, height, radius) {
+      const r = Math.min(radius, width / 2, height / 2);
+      target.beginPath();
+      target.moveTo(x + r, y);
+      target.lineTo(x + width - r, y);
+      target.quadraticCurveTo(x + width, y, x + width, y + r);
+      target.lineTo(x + width, y + height - r);
+      target.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+      target.lineTo(x + r, y + height);
+      target.quadraticCurveTo(x, y + height, x, y + height - r);
+      target.lineTo(x, y + r);
+      target.quadraticCurveTo(x, y, x + r, y);
+      target.closePath();
+    }
+
+    function drawGreenDocumentFilter(target, width, height) {
+      const docW = width * 0.27;
+      const docH = height * 0.17;
+      const docX = width * 0.23;
+      const docY = height * 0.83;
+
+      target.save();
+      target.translate(docX + docW / 2, docY + docH / 2);
+      target.rotate(-1 * Math.PI / 180);
+      target.translate(-docW / 2, -docH / 2);
+
+      roundedRectPath(target, 0, 0, docW, docH, 3);
+      target.clip();
+
+      if (documentImage.complete && documentImage.naturalWidth) {
+        target.drawImage(documentImage, 0, 0, docW, docH);
+      } else {
+        target.fillStyle = "#c5e4db";
+        target.fillRect(0, 0, docW, docH);
+      }
+
+      const miniX = docW * 0.14;
+      const miniY = docH * 0.39;
+      const miniW = docW * 0.28;
+      const miniH = docH * 0.44;
+
+      target.fillStyle = "rgba(255,255,255,.92)";
+      target.fillRect(miniX, miniY, miniW, miniH);
+      target.save();
+      target.rect(miniX, miniY, miniW, miniH);
+      target.clip();
+
+      const crop = Math.min(video.videoWidth, video.videoHeight) * 0.62;
+      const sx = (video.videoWidth - crop) / 2;
+      const sy = Math.max(0, video.videoHeight * 0.08);
+      target.translate(miniX + miniW, miniY);
+      target.scale(-1, 1);
+      target.drawImage(video, sx, sy, crop, crop, 0, 0, miniW, miniH);
+      target.restore();
+
+      target.restore();
+    }
+
+    function capturePhoto() {
+      if (!video.videoWidth || locked) return;
+      locked = true;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.save();
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+      drawGreenDocumentFilter(ctx, canvas.width, canvas.height);
+
+      resultImg.src = canvas.toDataURL("image/jpeg", 0.92);
+      result.style.display = "block";
+      retryBtn.style.display = "inline-block";
+      video.style.display = "none";
+      canvas.style.display = "block";
+      frameArea.classList.add("captured");
+      setOk("Foto capturada<br>com sucesso", "Se quiser, você pode refazer.");
+    }
+
+    function resetFlow() {
+      locked = false;
+      stable = 0;
+      result.style.display = "none";
+      retryBtn.style.display = "none";
+      video.style.display = "block";
+      canvas.style.display = "none";
+      frameArea.classList.remove("captured");
+      setWarn("Por favor coloque seu rosto<br>na moldura", "Permita o acesso à câmera e mantenha o rosto centralizado.");
+      monitor();
+    }
+
+    function monitor() {
+      cancelAnimationFrame(rafId);
+      const loop = async () => {
+        if (locked) return;
+
+        const face = await readFace();
+        if (detector || mediaPipeDetector) {
+          if (faceInside(face)) {
+            stable += 1;
+            setOk("Rosto detectado<br>na moldura", "Segure por um instante para capturar.");
+            if (stable >= 10) {
+              capturePhoto();
+              return;
+            }
+          } else {
+            stable = 0;
+            setWarn("Por favor coloque seu rosto<br>na moldura", "Centralize o rosto dentro da silhueta.");
+          }
+        } else {
+          setWarn("Por favor coloque seu rosto<br>na moldura", "Detector automatico indisponivel. Use o botao Capturar foto.");
+        }
+
+        rafId = requestAnimationFrame(loop);
+      };
+
+      rafId = requestAnimationFrame(loop);
+    }
+
+    captureBtn.addEventListener("click", capturePhoto);
+    retryBtn.addEventListener("click", resetFlow);
+
+    window.addEventListener("beforeunload", () => {
+      if (stream) stream.getTracks().forEach(track => track.stop());
+    });
+
+    startCamera();
+  </script>
+</body>
+</html>

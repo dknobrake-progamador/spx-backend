@@ -1,0 +1,136 @@
+SOLUCAO USADA PARA COLOCAR MARCADORES NO MAPA
+
+Data do registro: 05/06/2026
+
+Objetivo:
+Registrar o metodo usado para exibir os marcadores da rota no mapa, para que
+essa solucao possa ser mantida sem mexer nas partes que ja estao funcionando.
+
+
+1. ARQUIVOS ENVOLVIDOS
+
+Arquivo principal:
+app/tela-mapa.tsx
+
+Arquivos de apoio:
+lib/tela2EmRotaEngine.ts
+lib/tela2EmRotaTypes.ts
+lib/tela2EmRotaData.ts
+
+
+2. METODO USADO
+
+A tela do mapa nao usa react-native-maps.
+Ela usa um WebView com HTML interno carregando a API JavaScript do Google Maps.
+
+Dentro de app/tela-mapa.tsx existe a funcao buildMapHtml().
+Essa funcao monta um HTML completo com:
+- div do mapa
+- script do Google Maps
+- lista de marcadores convertida para JSON
+- criacao dos markers dentro do JavaScript do mapa
+
+O WebView recebe esse HTML assim:
+source={{ html: mapHtml, baseUrl: "https://www.google.com" }}
+
+
+3. ORIGEM DOS DADOS DOS MARCADORES
+
+Quando a tela esta no modo Em Rota, o mapa busca os dados da rota usando:
+- getCachedTela2EmRotaPayload()
+- refreshTela2EmRotaPayloadFromDownloads()
+
+Essas funcoes ficam em:
+lib/tela2EmRotaEngine.ts
+
+O payload da rota vem da planilha XLSX baixada no aparelho.
+Esse payload contem as paradas e os pedidos, incluindo:
+- endereco
+- bairro
+- cidade
+- latitude
+- longitude
+- numero da parada
+- codigo da AT quando a coluna e reconhecida
+
+Na planilha real usada em 05/06/2026, a AT esta na coluna "AT ID".
+Exemplo identificado no arquivo:
+AT202605305G4W1
+
+
+4. COMO OS MARCADORES SAO MONTADOS
+
+Em app/tela-mapa.tsx a funcao buildEmRotaMarkers(payload) transforma o payload
+da rota em uma lista simples de marcadores.
+
+Cada marcador segue este formato:
+- lat
+- lng
+- label
+- title
+- addressQuery
+
+Se a parada for "Sem parada", cada pedido vira um marcador separado.
+Se houver uma parada numerada, a parada vira um marcador usando um pedido de
+referencia daquela parada.
+
+
+5. TRATAMENTO DE COORDENADAS
+
+As coordenadas sao tratadas antes de entrar no mapa:
+
+parseCoordinate()
+- converte texto para numero
+- troca virgula por ponto
+- ignora valor invalido
+
+normalizeBrazilCoordinatePair()
+- verifica se latitude e longitude parecem coordenadas do Brasil
+- corrige caso latitude e longitude venham invertidas
+
+Isso evita marcador fora do mapa quando a planilha manda coordenada em ordem
+trocada.
+
+
+6. FALLBACK DOS MARCADORES
+
+Se o payload real nao existir, ou se os marcadores reais nao tiverem coordenadas
+validas, a tela usa a lista:
+EM_ROTA_MAP_FALLBACK_MARKERS
+
+Essa lista fica em app/tela-mapa.tsx e serve para nao deixar o mapa vazio.
+
+
+7. COMO O PIN DO MAPA E DESENHADO
+
+O marcador visual e um SVG criado por buildMarkerSvg(label).
+
+Esse SVG e convertido em data URI e usado como icon do Google Maps:
+url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg)
+
+O numero exibido dentro do pin vem do campo label.
+
+
+8. COMO O MAPA ENQUADRA OS MARCADORES
+
+Dentro do JavaScript do mapa:
+- cada marcador valido e adicionado ao bounds
+- os pontos tambem entram em resolvedPath
+- se houver mais de um ponto, e desenhada uma Polyline ligando a rota
+- depois o mapa chama fitBounds() para enquadrar os marcadores na tela
+
+Isso faz o mapa abrir ja mostrando a rota inteira.
+
+
+9. OBSERVACAO IMPORTANTE
+
+Nao mexer na tela 6 para corrigir mapa.
+Nao mexer na placa para corrigir mapa.
+O metodo dos marcadores fica concentrado em app/tela-mapa.tsx e na leitura do
+payload em lib/tela2EmRotaEngine.ts.
+
+Se precisar corrigir numero de AT, o ponto certo e a leitura do campo AT no
+parser da planilha em lib/tela2EmRotaEngine.ts, nao a tela 6.
+O card da AT no mapa em rota deve permanecer visivel e nunca exibir
+AT000000000000; se o payload ainda estiver carregando, usar a AT fallback da
+rota ate a planilha real atualizar o valor.

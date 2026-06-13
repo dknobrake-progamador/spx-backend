@@ -10,6 +10,7 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  Text,
   View,
 } from "react-native";
 import { RefreshAnimado, useRefreshAnimado } from "../components/refresh animado";
@@ -61,16 +62,16 @@ export default function Tela3Imagem() {
   const swipeLinePanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gestureState) =>
-      Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 20 &&
-      Math.abs(gestureState.vx) > 0.12,
+      Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 12 &&
+      Math.abs(gestureState.dx) > 24,
     onPanResponderRelease: async (_, gestureState) => {
-      const threshold = 50;
+      const threshold = 35;
       if (gestureState.dx >= threshold) {
-        router.push("/tela9");
+        router.push("/tela2");
         return;
       }
       if (gestureState.dx <= -threshold) {
-        router.push("/tela6");
+        router.push("/tela9");
       }
     },
   });
@@ -79,7 +80,7 @@ export default function Tela3Imagem() {
     return <SafeAreaView style={styles.container} />;
   }
 
-  if (telaPrincipal === "tela3") {
+  if (telaPrincipal === "tela30") {
     return <Redirect href="/tela3" />;
   }
 
@@ -109,8 +110,12 @@ export default function Tela3Imagem() {
           <Image
             source={require("../assets/images/tela30.png")}
             style={styles.image}
-            resizeMode="cover"
+            resizeMode="contain"
           />
+
+          <View pointerEvents="none" style={styles.ocorrenciaLabelMask}>
+            <Text style={styles.ocorrenciaLabelText}>Ocorrência</Text>
+          </View>
 
           <Pressable
             onPress={() => router.push("/tela6")}
@@ -241,16 +246,33 @@ const styles = StyleSheet.create({
   },
 
   imageWrapper: {
-    flex: 1,
+    width: "100%",
+    height: height,
     alignItems: "center",
     justifyContent: "flex-start",
-    backgroundColor: "#f5f5f5",
-    marginTop: -42,
+    backgroundColor: "#fff",
   },
 
   image: {
     width: "100%",
     height: "100%",
+  },
+
+  ocorrenciaLabelMask: {
+    position: "absolute",
+    top: height * 0.106,
+    left: width * 0.355,
+    width: width * 0.31,
+    height: 30,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  ocorrenciaLabelText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#9ca3af",
   },
 
   hitbox: {

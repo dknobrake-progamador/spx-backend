@@ -1,0 +1,27 @@
+SOLUCAO SCANER
+
+Problema encontrado:
+- A Tela 8 ficava presa em "Abrindo camera...".
+- No celular novo, `useCameraPermissions()` retornava `null` primeiro e a camera nao conseguia completar a inicializacao.
+- O fluxo de permissao e o overlay estavam impedindo a experiencia de toque e a abertura consistente do scanner.
+
+Solucoes aplicadas:
+1. A permissão passou a ser solicitada explicitamente.
+- Quando `permission` vem `null`, o app chama `requestPermission()` de forma controlada.
+
+2. A Tela 8 passou a montar melhor a camera.
+- A `CameraView` foi mantida no fluxo principal do scanner.
+- O `onCameraReady` passou a ser usado como sinal de que a camera realmente subiu.
+
+3. O carregamento deixou de bloquear a tela.
+- O scanner nao fica mais preso em um estado visual que impede a interacao.
+- O overlay de carregamento foi ajustado para nao travar o fluxo no aparelho novo.
+
+Resultado:
+- O scanner passou a abrir no celular novo.
+- O `onCameraReady` passou a disparar.
+- A tela deixou de ficar presa indefinidamente em carregamento.
+
+Observacao:
+- A correção foi feita com foco em estabilidade e em reduzir o bloqueio causado pelo estado de permissao `null` no Android novo.
+

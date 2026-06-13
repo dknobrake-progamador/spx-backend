@@ -1,3 +1,4 @@
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -35,6 +36,19 @@ function slotToCloudKey(slot: SlotKey): CloudPhotoKey {
   if (slot === "tela6") return "tela6";
   if (slot === "tela11") return "tela11";
   return "placa2";
+}
+
+async function prepareUploadUri(slot: SlotKey, uri: string) {
+  if (slot !== "tela6") {
+    return uri;
+  }
+
+  const result = await manipulateAsync(uri, [], {
+    compress: 0.72,
+    format: SaveFormat.WEBP,
+  });
+
+  return result.uri;
 }
 
 export default function UploadFotos() {
@@ -106,14 +120,17 @@ export default function UploadFotos() {
       setStatus("Selecao cancelada.");
       return;
     }
-    const uri = result.assets[0]?.uri;
-    if (!uri) {
+    const selectedUri = result.assets[0]?.uri;
+    if (!selectedUri) {
       setLoading(false);
       setStatus("Falha ao ler imagem.");
       return;
     }
 
     try {
+      setStatus(slot === "tela6" ? "Otimizando Tela 6..." : "Salvando local...");
+      const uri = await prepareUploadUri(slot, selectedUri);
+
       setStatus("Salvando local...");
       if (slot === "tela4") {
         await setPlacaUri(uri);

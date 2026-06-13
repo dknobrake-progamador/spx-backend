@@ -1,0 +1,39 @@
+METODOLOGIA TELA EM ROTA
+
+Objetivo:
+- Manter o mapa da tela em rota funcionando de forma estável no telefone novo, sem quebrar o comportamento que já estava correto.
+
+Metodologia aplicada:
+1. Preservar o que já funcionava
+- A tela em rota não foi refatorada de forma agressiva.
+- O foco foi manter o fluxo atual que já estava renderizando corretamente no aparelho novo.
+- Evitamos mexer em partes que não estavam ligadas diretamente ao mapa ou aos marcadores.
+
+2. Reduzir dependências desnecessarias
+- Sempre que possivel, o carregamento passou a depender do dado local ja disponivel.
+- Isso evita esperar por chamadas mais pesadas quando o mapa ja pode ser montado com o que existe em memoria ou no armazenamento local.
+
+3. Evitar corrida de renderizacao
+- A metodologia usada nas telas que apresentavam tela branca foi aplicada com cuidado:
+  - evitar limpar estado antes da hora;
+  - evitar depender de variaveis de ciclo de vida fragilizadas por remount;
+  - evitar bloquear a renderizacao com passos lentos desnecessarios.
+
+4. Preferir leitura direta dos dados quando o objetivo e apenas exibir
+- Quando a tela precisa apenas mostrar o mapa e os marcadores, a leitura direta dos dados corretos e mais confiavel do que passar por camadas intermediarias desnecessarias.
+- Isso reduz risco de travamento, branco ou inconsistencia de estado.
+
+5. Manter o mapa intacto quando ja esta correto
+- Se no telefone novo o mapa da tela em rota esta perfeito, a regra principal e nao alterar o que ja esta bom.
+- A metodologia aqui e conservadora: corrigir apenas o que quebra, sem mexer na base estavel.
+
+Padrao tecnico seguido:
+- Confirmar o comportamento no aparelho novo.
+- Identificar se o problema vem de estado, renderizacao, leitura de arquivo ou ciclo de vida.
+- Aplicar o menor ajuste possivel.
+- Testar novamente antes de mudar outra parte.
+
+Resultado:
+- O mapa da tela em rota ficou preservado no estado atual.
+- A abordagem adotada foi de estabilidade, minimo risco e manutencao do comportamento que ja estava correto.
+

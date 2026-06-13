@@ -1,0 +1,571 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
+import * as XLSX from "xlsx";
+import { TELA2_EM_ROTA_DATA } from "./tela2EmRotaData";
+import type { Tela2EmRotaOrder, Tela2EmRotaPayload, Tela2EmRotaStopBlock } from "./tela2EmRotaTypes";
+
+const KEY_EM_ROTA_PAYLOAD = "@DEV_EM_ROTA_PAYLOAD";
+const KEY_EM_ROTA_DOWNLOADS_URI = "@DEV_EM_ROTA_DOWNLOADS_URI";
+const PLACEHOLDER_AT_ID = "AT000000000000";
+const MAX_VALID_XLSX_ROWS = 150;
+const DIRECT_DOWNLOAD_URIS = [
+  "file:///storage/emulated/0/Download",
+  "file:///storage/emulated/0/Downloads",
+  "file:///storage/emulated/0/download",
+  "file:///storage/emulated/0/downloads",
+  "file:///sdcard/Download",
+  "file:///sdcard/Downloads",
+  "file:///sdcard/download",
+  "file:///sdcard/downloads",
+];
+
+const FIRST_NAMES = [
+  "Aline",
+  "Bruno",
+  "Camila",
+  "Daniel",
+  "Eduarda",
+  "Felipe",
+  "Gabriela",
+  "Henrique",
+  "Isabela",
+  "Joao",
+  "Karina",
+  "Lucas",
+  "Mariana",
+  "Nathalia",
+  "Otavio",
+  "Priscila",
+  "Rafael",
+  "Sabrina",
+  "Thiago",
+  "Vanessa",
+  "Yasmin",
+  "Bianca",
+  "Gustavo",
+  "Patricia",
+  "Rodrigo",
+  "Leandro",
+  "Monica",
+  "Renata",
+];
+
+const MIDDLE_NAMES = [
+  "da",
+  "de",
+  "dos",
+  "das",
+];
+
+const LAST_NAMES = [
+  "Almeida",
+  "Alves",
+  "Araujo",
+  "Assis",
+  "Barbosa",
+  "Batista",
+  "Carvalho",
+  "Castro",
+  "Correia",
+  "Costa",
+  "Ferreira",
+  "Freitas",
+  "Gomes",
+  "Lima",
+  "Machado",
+  "Martins",
+  "Mendes",
+  "Monteiro",
+  "Moreira",
+  "Moura",
+  "Nogueira",
+  "Oliveira",
+  "Pereira",
+  "Ribeiro",
+  "Rocha",
+  "Rodrigues",
+  "Silva",
+  "Souza",
+  "Teixeira",
+  "Vieira",
+];
+
+type XlsxCandidate = {
+  uri: string;
+  name: string;
+  modifiedAt: number;
+};
+
+type RawRow = Record<string, unknown>;
+
+function getFallbackPayload(): Tela2EmRotaPayload {
+  const stops: Tela2EmRotaStopBlock[] = TELA2_EM_ROTA_DATA.map((block) => ({
+    stop: String(block.stop),
+    count: block.count,
+    orders: block.orders.map((order) => ({
+      num: String(order.num),
+      sequenceValue: Number.isFinite(order.num) ? Number(order.num) : null,
+      stopValue: Number.isFinite(block.stop) ? Number(block.stop) : null,
+      code: order.code,
+      atId: "AT202605305G4W1",
+      address: order.address,
+      recipient: order.recipient,
+      district: order.district,
+      city: order.city,
+      zipcode: order.zipcode,
+      latitude: "",
+      longitude: "",
+      tags: [...order.tags],
+    })),
+  }));
+
+  const totalOrders = stops.reduce((sum, stop) => sum + stop.count, 0);
+
+  return {
+    atId: "AT202605305G4W1",
+    totalOrders,
+    rowsCount: totalOrders,
+    sourceFileName: null,
+    sourceFileUri: null,
+    sourceModifiedAt: null,
+    stops,
+  };
+}
+
+function normalizeKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function sanitizeText(value: unknown) {
+  if (value === null || value === undefined) return "";
+  return String(value).replace(/\s+/g, " ").trim();
+}
+
+export function extractAtIdFromText(value: unknown) {
+  const compact = sanitizeText(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "");
+  const match = compact.match(/AT\d[0-9A-Z]{5,}/);
+  const atId = match?.[0] || "";
+
+  if (!atId || /^AT0+$/i.test(atId) || atId === PLACEHOLDER_AT_ID) {
+    return "";
+  }
+
+  return atId;
+}
+
+function parseOptionalNumber(value: string) {
+  if (!value || value === "-") return null;
+  const digitsOnly = value.replace(/[^\d-]/g, "");
+  if (!digitsOnly) return null;
+  const parsed = Number.parseInt(digitsOnly, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getRowField(row: RawRow, aliases: string[]) {
+  const normalizedAliases = aliases.map(normalizeKey);
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizedAliases.includes(normalizeKey(key))) {
+      return sanitizeText(value);
+    }
+  }
+  return "";
+}
+
+const AT_FIELD_ALIASES = [
+  "AT",
+  "AT ID",
+  "AT Code",
+  "AT Number",
+  "AT No",
+  "AT No.",
+  "A.T.",
+  "Codigo AT",
+  "Codigo da AT",
+  "Código AT",
+  "Código da AT",
+  "Numero AT",
+  "Numero da AT",
+  "Número AT",
+  "Número da AT",
+  "N AT",
+  "Nº AT",
+  "N° AT",
+  "ID AT",
+  "ID da AT",
+  "Assign Task ID",
+  "Assigned Task ID",
+  "Assignment Task ID",
+  "Task ID",
+  "Tarefa ID",
+  "ID da tarefa",
+  "Route ID",
+  "Route Code",
+  "Rota ID",
+  "Codigo da rota",
+  "Código da rota",
+  "Trip ID",
+  "Viagem ID",
+  "Manifest ID",
+  "Manifesto ID",
+];
+
+function getRowAtId(row: RawRow) {
+  const aliasValue = getRowField(row, AT_FIELD_ALIASES);
+  const aliasAtId = extractAtIdFromText(aliasValue);
+  if (aliasAtId) {
+    return aliasAtId;
+  }
+
+  for (const [key, value] of Object.entries(row)) {
+    const normalizedKey = normalizeKey(key);
+    const keyLooksLikeAt =
+      /\bat\b/.test(normalizedKey) ||
+      /\bassign/.test(normalizedKey) ||
+      /\btask\b/.test(normalizedKey) ||
+      /\btarefa\b/.test(normalizedKey) ||
+      /\broute\b/.test(normalizedKey) ||
+      /\brota\b/.test(normalizedKey) ||
+      /\btrip\b/.test(normalizedKey) ||
+      /\bviagem\b/.test(normalizedKey) ||
+      /\bmanifest/.test(normalizedKey);
+
+    if (!keyLooksLikeAt) {
+      continue;
+    }
+
+    const keyAtId = extractAtIdFromText(value);
+    if (keyAtId) {
+      return keyAtId;
+    }
+  }
+
+  for (const value of Object.values(row)) {
+    const valueAtId = extractAtIdFromText(value);
+    if (valueAtId) {
+      return valueAtId;
+    }
+  }
+
+  return "";
+}
+
+function hashString(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function buildFakeRecipient(seedBase: string) {
+  const hash = hashString(seedBase || "sem-destinatario");
+  const first = FIRST_NAMES[hash % FIRST_NAMES.length];
+  const middle = MIDDLE_NAMES[Math.floor(hash / 7) % MIDDLE_NAMES.length];
+  const lastA = LAST_NAMES[Math.floor(hash / 17) % LAST_NAMES.length];
+  const lastB = LAST_NAMES[Math.floor(hash / 31) % LAST_NAMES.length];
+  const lastC = LAST_NAMES[Math.floor(hash / 53) % LAST_NAMES.length];
+  return `${first} ${middle} ${lastA} ${lastB} ${lastC}_`;
+}
+
+function buildTags(district: string, city: string, zipcode: string) {
+  const tags: string[] = [];
+  if (district || city) {
+    tags.push([district, city].filter(Boolean).join(" - "));
+  }
+  if (zipcode) {
+    tags.push(`CEP ${zipcode}`);
+  }
+  return tags;
+}
+
+function isFilledRow(row: RawRow) {
+  return Object.values(row).some((value) => sanitizeText(value) !== "");
+}
+
+function extractRowsFromBase64(base64: string) {
+  const workbook = XLSX.read(base64, { type: "base64" });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) {
+    return [] as RawRow[];
+  }
+  const sheet = workbook.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json<RawRow>(sheet, {
+    defval: "",
+    raw: false,
+  });
+  return rows.filter(isFilledRow);
+}
+
+function joinFileUri(baseUri: string, childName: string) {
+  const normalizedBase = baseUri.replace(/\/+$/, "");
+  return `${normalizedBase}/${childName}`;
+}
+
+async function collectXlsxCandidatesFromDirectory(
+  dirUri: string,
+  depth = 0,
+  maxDepth = 2
+) {
+  if (depth > maxDepth) {
+    return [] as XlsxCandidate[];
+  }
+
+  const entries = await FileSystem.readDirectoryAsync(dirUri);
+  const candidates: XlsxCandidate[] = [];
+
+  for (const entry of entries) {
+    const name = entry.split("/").pop() || entry;
+    const uri = entry.startsWith("file://") ? entry : joinFileUri(dirUri, entry);
+
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (!info.exists) {
+        continue;
+      }
+
+      if (info.isDirectory) {
+        const nested = await collectXlsxCandidatesFromDirectory(uri, depth + 1, maxDepth);
+        candidates.push(...nested);
+        continue;
+      }
+
+      if (!name.toLowerCase().endsWith(".xlsx")) {
+        continue;
+      }
+
+      candidates.push({
+        uri,
+        name,
+        modifiedAt: typeof info.modificationTime === "number" ? info.modificationTime : 0,
+      });
+    } catch {
+      // Ignore unreadable files/subdirectories and continue scanning.
+    }
+  }
+
+  return candidates;
+}
+
+function mapRowsToPayload(rows: RawRow[], candidate: XlsxCandidate): Tela2EmRotaPayload {
+  const fileAtId = extractAtIdFromText(candidate.name) || extractAtIdFromText(candidate.uri);
+  const parsedRows = rows.map((row, index) => {
+    const atId = getRowAtId(row) || fileAtId || PLACEHOLDER_AT_ID;
+    const sequenceRaw = getRowField(row, ["Sequence", "Order", "Ordem", "Sequencia"]);
+    const stopRaw = getRowField(row, ["Stop", "Parada"]);
+    const code = getRowField(row, ["SPX TN", "Codigo BR", "BR", "Codigo"]);
+    const address = getRowField(row, ["Destination Address", "Address", "Endereco"]);
+    const district = getRowField(row, ["Bairro", "District"]);
+    const city = getRowField(row, ["City", "Cidade"]);
+    const zipcode = getRowField(row, ["Zipcode/Postal code", "Zipcode", "Postal code", "CEP"]);
+    const latitude = getRowField(row, ["Latitude", "Lat"]);
+    const longitude = getRowField(row, ["Longitude", "Lng", "Lon"]);
+    const sequenceValue = parseOptionalNumber(sequenceRaw);
+    const stopValue = parseOptionalNumber(stopRaw);
+    const seedBase = `${code}|${address}|${district}|${city}|${index}`;
+    const recipient = buildFakeRecipient(seedBase);
+
+    return {
+      index,
+      atId,
+      sequenceValue,
+      stopValue,
+      code: code || `SEM CODIGO ${index + 1}`,
+      address: address || "Endereco nao informado",
+      district,
+      city,
+      zipcode,
+      latitude,
+      longitude,
+      recipient,
+    };
+  });
+
+  const sortedRows = [...parsedRows].sort((left, right) => {
+    const leftMissingBoth = left.sequenceValue === null && left.stopValue === null;
+    const rightMissingBoth = right.sequenceValue === null && right.stopValue === null;
+    if (leftMissingBoth !== rightMissingBoth) {
+      return leftMissingBoth ? -1 : 1;
+    }
+
+    const leftStop = left.stopValue ?? Number.MAX_SAFE_INTEGER;
+    const rightStop = right.stopValue ?? Number.MAX_SAFE_INTEGER;
+    if (leftStop !== rightStop) {
+      return leftStop - rightStop;
+    }
+
+    const leftSequence = left.sequenceValue ?? Number.MAX_SAFE_INTEGER;
+    const rightSequence = right.sequenceValue ?? Number.MAX_SAFE_INTEGER;
+    if (leftSequence !== rightSequence) {
+      return leftSequence - rightSequence;
+    }
+
+    return left.index - right.index;
+  });
+
+  const grouped = new Map<string, Tela2EmRotaOrder[]>();
+
+  for (const row of sortedRows) {
+    const groupKey = row.stopValue === null ? "Sem parada" : String(row.stopValue);
+    const currentGroup = grouped.get(groupKey) || [];
+    currentGroup.push({
+      num:
+        row.sequenceValue !== null
+          ? String(row.sequenceValue)
+          : row.stopValue !== null
+            ? String(row.stopValue)
+            : "-",
+      sequenceValue: row.sequenceValue,
+      stopValue: row.stopValue,
+      code: row.code,
+      atId: row.atId,
+      address: row.address,
+      recipient: row.recipient,
+      district: row.district,
+      city: row.city,
+      zipcode: row.zipcode,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      tags: buildTags(row.district, row.city, row.zipcode),
+    });
+    grouped.set(groupKey, currentGroup);
+  }
+
+  const stops: Tela2EmRotaStopBlock[] = Array.from(grouped.entries()).map(([stop, orders]) => ({
+    stop,
+    count: orders.length,
+    orders,
+  }));
+
+  const atId =
+    sortedRows.find((row) => extractAtIdFromText(row.atId))?.atId ||
+    fileAtId ||
+    PLACEHOLDER_AT_ID;
+
+  return {
+    atId,
+    totalOrders: sortedRows.length,
+    rowsCount: sortedRows.length,
+    sourceFileName: candidate.name,
+    sourceFileUri: candidate.uri,
+    sourceModifiedAt: candidate.modifiedAt,
+    stops,
+  };
+}
+
+async function listDirectDownloadCandidates() {
+  const candidates: XlsxCandidate[] = [];
+
+  for (const dirUri of DIRECT_DOWNLOAD_URIS) {
+    try {
+      const nestedCandidates = await collectXlsxCandidatesFromDirectory(dirUri);
+      candidates.push(...nestedCandidates);
+    } catch {
+      // Ignore inaccessible directories and keep searching.
+    }
+  }
+
+  return candidates;
+}
+
+async function listSafDownloadCandidates() {
+  const safUri = await AsyncStorage.getItem(KEY_EM_ROTA_DOWNLOADS_URI);
+  if (!safUri) {
+    return [] as XlsxCandidate[];
+  }
+
+  try {
+    const entries = await FileSystem.StorageAccessFramework.readDirectoryAsync(safUri);
+    return entries
+      .filter((uri) => uri.toLowerCase().endsWith(".xlsx"))
+      .map((uri) => ({
+        uri,
+        name: decodeURIComponent(uri.split("%2F").pop() || uri.split("/").pop() || "arquivo.xlsx"),
+        modifiedAt: 0,
+      }));
+  } catch {
+    return [] as XlsxCandidate[];
+  }
+}
+
+async function getSortedCandidates() {
+  const candidates = [...(await listDirectDownloadCandidates()), ...(await listSafDownloadCandidates())];
+  const seen = new Set<string>();
+  return candidates
+    .filter((candidate) => {
+      if (seen.has(candidate.uri)) return false;
+      seen.add(candidate.uri);
+      return true;
+    })
+    .sort((left, right) => right.modifiedAt - left.modifiedAt);
+}
+
+export async function getCachedTela2EmRotaPayload() {
+  const raw = await AsyncStorage.getItem(KEY_EM_ROTA_PAYLOAD);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as Tela2EmRotaPayload;
+  } catch {
+    await AsyncStorage.removeItem(KEY_EM_ROTA_PAYLOAD);
+    return null;
+  }
+}
+
+export async function getTela2EmRotaPayload() {
+  return (await getCachedTela2EmRotaPayload()) || getFallbackPayload();
+}
+
+export async function getTela2EmRotaTotalCount() {
+  const payload = await getTela2EmRotaPayload();
+  return payload.totalOrders;
+}
+
+export async function setTela2EmRotaDownloadsUri(uri: string | null) {
+  if (!uri) {
+    await AsyncStorage.removeItem(KEY_EM_ROTA_DOWNLOADS_URI);
+    return;
+  }
+  await AsyncStorage.setItem(KEY_EM_ROTA_DOWNLOADS_URI, uri);
+}
+
+export async function refreshTela2EmRotaPayloadFromDownloads() {
+  const candidates = await getSortedCandidates();
+
+  for (const candidate of candidates) {
+    try {
+      const base64 = await FileSystem.readAsStringAsync(candidate.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const rows = extractRowsFromBase64(base64);
+      if (rows.length === 0 || rows.length > MAX_VALID_XLSX_ROWS) {
+        continue;
+      }
+
+      const payload = mapRowsToPayload(rows, candidate);
+      await AsyncStorage.setItem(KEY_EM_ROTA_PAYLOAD, JSON.stringify(payload));
+      return payload;
+    } catch {
+      // Ignore unreadable or malformed XLSX files and keep searching.
+    }
+  }
+
+  const cached = await getCachedTela2EmRotaPayload();
+  if (cached) {
+    return cached;
+  }
+
+  const fallback = getFallbackPayload();
+  await AsyncStorage.setItem(KEY_EM_ROTA_PAYLOAD, JSON.stringify(fallback));
+  return fallback;
+}
+
+export const TELA2_EM_ROTA_FALLBACK_PAYLOAD = getFallbackPayload();

@@ -1,158 +1,89 @@
-import { router } from "expo-router";
-import React from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Dimensions,
-  Image,
   PanResponder,
   Pressable,
-  RefreshControl,
-  ScrollView,
   StyleSheet,
   View,
 } from "react-native";
+import { WebView } from "react-native-webview";
 import { RefreshAnimado, useRefreshAnimado } from "../components/refresh animado";
-
-const { width } = Dimensions.get("window");
-const TOP_WHITE_MARGIN = 26;
-const HEADER_HEIGHT = 170;
-
-const sections = [
-  {
-    source: require("../assets/rolagem/entregues/rolo.png"),
-    width: 720,
-    height: 1282,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo2.png"),
-    width: 720,
-    height: 940,
-  },
-  {
-    source: require("../assets/rolagem/entregues/Rolo3.png"),
-    width: 720,
-    height: 1099,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo4.png"),
-    width: 720,
-    height: 966,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo5.png"),
-    width: 720,
-    height: 921,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo6.png"),
-    width: 720,
-    height: 1128,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo7.png"),
-    width: 706,
-    height: 1183,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo8.png"),
-    width: 720,
-    height: 1158,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo9.png"),
-    width: 705,
-    height: 1131,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo10.png"),
-    width: 720,
-    height: 1118,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo11.png"),
-    width: 720,
-    height: 1154,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo12.png"),
-    width: 720,
-    height: 1152,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo13.png"),
-    width: 720,
-    height: 1176,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo14.png"),
-    width: 720,
-    height: 1160,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo15.png"),
-    width: 720,
-    height: 1145,
-  },
-  {
-    source: require("../assets/rolagem/entregues/rolo16.png"),
-    width: 720,
-    height: 1150,
-  },
-] as const;
+import { getTela2Variant, getTela3PrimaryScreen } from "../lib/devStorage";
+import { getTela2EmRotaTotal } from "../lib/tela2EmRotaMeta";
+import { TELA9_HTML } from "../lib/tela9WebViewHtml";
 
 export default function Tela9() {
   const refreshAnimado = useRefreshAnimado();
+  const webViewRef = useRef<WebView>(null);
+  const [emRotaLabelCount, setEmRotaLabelCount] = useState(0);
   const swipePanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gestureState) =>
-      Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 20 &&
-      Math.abs(gestureState.vx) > 0.12,
-    onPanResponderRelease: (_, gestureState) => {
-      if (gestureState.dx <= -50) {
-        router.push("/tela3-imagem");
+      Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 12 &&
+      Math.abs(gestureState.dx) > 24,
+    onPanResponderRelease: async (_, gestureState) => {
+      if (gestureState.dx >= 35) {
+        const telaPrincipal = await getTela3PrimaryScreen();
+        router.push(telaPrincipal === "tela30" ? "/tela3-imagem" : "/tela3");
       }
     },
   });
 
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+
+      async function loadTelaState() {
+        const variant = await getTela2Variant();
+        const emRotaTotal = await getTela2EmRotaTotal();
+        if (mounted) {
+          setEmRotaLabelCount(variant === "em-rota" ? emRotaTotal : 0);
+        }
+      }
+
+      loadTelaState();
+
+      return () => {
+        mounted = false;
+      };
+    }, [])
+  );
+
+  const labelInjectionScript = useMemo(
+    () => `
+      (function() {
+        var el = document.getElementById("em-rota-label");
+        if (el) {
+          el.textContent = "Em Rota (${emRotaLabelCount})";
+        }
+      })();
+      true;
+    `,
+    [emRotaLabelCount]
+  );
+
+  useEffect(() => {
+    webViewRef.current?.injectJavaScript(labelInjectionScript);
+  }, [labelInjectionScript]);
+
   return (
     <View style={styles.container} {...swipePanResponder.panHandlers}>
-      <Image
-        source={require("../assets/images/tela9.png")}
-        style={styles.headerImage}
-        resizeMode="cover"
-      />
-      <View style={styles.headerDivider} />
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
+      <WebView
+        ref={webViewRef}
+        source={{ html: TELA9_HTML }}
+        style={styles.webview}
+        originWhitelist={["*"]}
+        javaScriptEnabled
+        domStorageEnabled
         showsVerticalScrollIndicator={false}
+        overScrollMode="never"
         bounces={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={false}
-            onRefresh={refreshAnimado.iniciarAnimacao}
-            colors={["transparent"]}
-            progressBackgroundColor="transparent"
-            tintColor="transparent"
-            titleColor="transparent"
-            progressViewOffset={-120}
-          />
-        }
-      >
-        {sections.map((section, index) => (
-          <Image
-            key={index}
-            source={section.source}
-            style={[
-              styles.sectionImage,
-              {
-                height: (width * section.height) / section.width,
-              },
-            ]}
-            resizeMode="stretch"
-          />
-        ))}
-      </ScrollView>
+        startInLoadingState={false}
+        pullToRefreshEnabled
+        onLoadEnd={() => {
+          webViewRef.current?.injectJavaScript(labelInjectionScript);
+        }}
+      />
 
       <Pressable
         onPress={() => router.push("/tela6")}
@@ -181,42 +112,12 @@ export default function Tela9() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#eef0f5",
   },
 
-  headerImage: {
-    position: "absolute",
-    top: TOP_WHITE_MARGIN,
-    left: 0,
-    right: 0,
-    width: "100%",
-    height: HEADER_HEIGHT,
-  },
-
-  headerDivider: {
-    position: "absolute",
-    top: TOP_WHITE_MARGIN + HEADER_HEIGHT,
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: "#d9d9d9",
-  },
-
-  scroll: {
-    position: "absolute",
-    top: TOP_WHITE_MARGIN + HEADER_HEIGHT,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-
-  content: {
-    paddingBottom: 24,
-  },
-
-  sectionImage: {
-    width: "100%",
-    backgroundColor: "transparent",
+  webview: {
+    flex: 1,
+    backgroundColor: "#eef0f5",
   },
 
   areaVerde: {

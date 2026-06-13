@@ -19,7 +19,7 @@ import {
   BARCODE_PAGE_LOCK,
   getLockedBarcodeMetrics,
 } from "../lib/barcode-page-lock";
-import { applyGeneratedPlateToUser, getCurrentProfile } from "../lib/devStorage";
+import { applyGeneratedPlateToUser, getPlaca2Active } from "../lib/devStorage";
 
 const GENERATE_BUTTON_BARS = Array.from({ length: 56 }, (_, index) => {
   const pattern = ["hair", "thin", "wide", "thin", "medium", "hair", "wide", "thin"];
@@ -179,9 +179,9 @@ export default function PlacasCarros() {
       let active = true;
 
       (async () => {
-        const profile = await getCurrentProfile();
+        const placa2Active = await getPlaca2Active();
         if (!active) return;
-        setImageTarget(profile === "008" ? "Placa 2" : "Placa 1");
+        setImageTarget(placa2Active ? "Placa 2" : "Placa 1");
       })();
 
       return () => {

@@ -1,0 +1,15 @@
+SNAPSHOT DO ESTADO ATUAL
+Data/hora: 2026-06-12 19:12:02 -03:00
+Projeto: D:\apk-shopee APK 01.06.2026
+
+FINALIDADE
+Este snapshot marca o estado do projeto antes das novas alteracoes solicitadas
+apos a criacao deste arquivo. Use este documento junto com o controle do Git
+e o REGISTRO_FUTURAS_ALTERACOES.txt para rastrear o que mudou depois.
+
+OBSERVACOES
+- O projeto ja estava com varias alteracoes pendentes antes deste snapshot.
+- Nada foi revertido.
+- Nenhum APK foi gerado neste momento.
+- A proxima alteracao solicitada sera trocar a Tela 6 usando o arquivo tela6.html.
+

@@ -1,0 +1,84 @@
+REGISTRO DE FUTURAS ALTERACOES
+Projeto: D:\apk-shopee APK 01.06.2026
+Inicio do registro: 2026-06-12 19:12:02 -03:00
+
+OBJETIVO
+Este arquivo deve documentar todas as alteracoes feitas a partir deste ponto,
+para facilitar desfazer ou comparar caso alguma mudanca quebre o aplicativo.
+
+ESTADO PROTEGIDO INICIAL
+- Estado atual antes das proximas alteracoes solicitado pelo usuario.
+- A partir daqui, cada mudanca relevante deve ser registrada com:
+  data/hora, arquivos alterados, motivo e como desfazer conceitualmente.
+
+ALTERACOES FUTURAS
+
+[2026-06-12 19:20 -03:00] Nova Tela 6 baseada em HTML fornecido pelo usuario
+- Arquivos alterados/criados:
+  - app/tela6.tsx
+  - lib/tela6MenuHtml.ts
+- Motivo:
+  - Substituir a imagem/tela antiga da Tela 6 pelo HTML enviado em tela6.html, mantendo as caracteristicas funcionais da Tela 6 atual.
+- O que foi mantido da Tela 6 anterior:
+  - Tela cheia sem scroll.
+  - Swipe horizontal para direita navegando para /tela3-imagem.
+  - Area invisivel do lado direito navegando para /tela2.
+  - Area invisivel superior central navegando para /placa.
+  - Area invisivel superior esquerda navegando para /tela11.
+- O que mudou:
+  - A exibicao principal passou a usar WebView carregando o HTML em lib/tela6MenuHtml.ts.
+  - O HTML recebido e ajustado por CSS/JS para ocupar a tela inteira, preservando proporcao e preenchendo o display.
+- Como desfazer conceitualmente:
+  - Restaurar o app/tela6.tsx anterior que carregava imagem local/nuvem via getTela6Uri/hydrateCurrentUserPhotosFromCloud.
+  - Remover lib/tela6MenuHtml.ts se nao for mais usado.
+
+[2026-06-12 19:23 -03:00] Correcao do corte lateral da nova Tela 6
+- Arquivo alterado:
+  - app/tela6.tsx
+- Motivo:
+  - A primeira adaptacao usava escala por cobertura da tela, o que podia cortar a lateral direita do HTML em aparelhos altos.
+- O que foi ajustado:
+  - A escala do HTML passou a respeitar a largura total do layout original de 465px.
+  - O ponto de origem da escala foi fixado no canto superior esquerdo para preservar a faixa direita.
+- Como desfazer conceitualmente:
+  - Reverter o calculo de escala em buildTela6Html para o comportamento anterior, se for desejado preencher altura cortando laterais.
+
+[2026-06-12 19:27 -03:00] Tela 6 ajustada para respeitar o HTML pronto sem escala manual
+- Arquivo alterado:
+  - app/tela6.tsx
+- Motivo:
+  - A escala manual via transform alterava a proporcao visual do HTML enviado e deixava a tela diferente do arquivo original.
+- O que foi ajustado:
+  - Removida a escala JavaScript/CSS manual.
+  - O WebView agora usa viewport fixo de 465px, igual a largura original do HTML.
+  - Mantidos os atalhos invisiveis e o swipe herdados da Tela 6 anterior.
+- Como desfazer conceitualmente:
+  - Restaurar a versao anterior de buildTela6Html se for necessario voltar ao ajuste por transform.
+
+[2026-06-12 19:35 -03:00] Tela 6 com dimensoes reais para expor lateral direita
+- Arquivo alterado:
+  - app/tela6.tsx
+- Motivo:
+  - A exposicao da faixa direita estava sendo feita com scaleX, o que compactava visualmente o painel branco por transform.
+- O que foi ajustado:
+  - Removido o transform horizontal do painel principal.
+  - Definida dimensao real do painel branco em 267px dentro do canvas original de 465px.
+  - Definida a faixa direita com 198px, ocupando o restante do canvas.
+  - Mantidos os atalhos invisiveis e o swipe herdados da Tela 6 anterior.
+- Como desfazer conceitualmente:
+  - Voltar a largura original do phone-shell para 392px e da right-side para 73px no CSS injetado.
+
+[2026-06-12 20:48 -03:00] Barra nativa inferior branca na Tela 6
+- Arquivos alterados:
+  - app/tela6.tsx
+  - package.json
+  - package-lock.json
+- Motivo:
+  - A area dos botoes nativos inferiores do Android estava aparecendo cinza; o usuario pediu que essa area fosse branca.
+- O que foi ajustado:
+  - Adicionado expo-navigation-bar.
+  - Ao abrir a Tela 6, o app chama NavigationBar.setBackgroundColorAsync("#ffffff").
+  - Os botoes nativos sao configurados com NavigationBar.setButtonStyleAsync("dark").
+- Como desfazer conceitualmente:
+  - Remover o import/uso de expo-navigation-bar em app/tela6.tsx.
+  - Remover a dependencia expo-navigation-bar do package.json e atualizar o package-lock.json.

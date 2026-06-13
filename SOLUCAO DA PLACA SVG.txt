@@ -1,0 +1,31 @@
+SOLUCAO DA PLACA SVG
+
+Problema encontrado:
+- A placa era um arquivo SVG local.
+- No celular novo, a tela ficava branca porque o componente de preview dependia de leitura assíncrona do SVG e do cálculo do layout antes de renderizar.
+- O fluxo com `getPersistedImage()` e `resolvePlateState()` também podia atrasar ou travar a exibição.
+
+Solucoes aplicadas que fizeram a placa voltar:
+1. Na tela da placa, a leitura da imagem passou a usar `AsyncStorage` direto:
+   - `@DEV_PLACA_URI`
+   - `@DEV_PLACA_2_URI`
+   - `@DEV_PLACA_2_ACTIVE`
+   Isso evitou a passagem pelo fluxo mais pesado de persistencia.
+
+2. O preview SVG em `components/flexible-photo-preview.tsx` foi ajustado para não depender do `alive` no caminho feliz:
+   - o XML do SVG continua sendo setado mesmo se a tela trocar de foco durante a leitura.
+
+3. Foi adicionada instrumentacao para diagnostico:
+   - logs de leitura do SVG
+   - logs de `onLayout`
+   - logs de calculo do `svgBox`
+
+4. A leitura do SVG ganhou fallback:
+   - tentativa com `FileSystem.readAsStringAsync`
+   - timeout de seguranca
+   - fallback com `fetch()` se a leitura direta falhar
+
+Resultado:
+- A placa voltou a aparecer corretamente no celular novo.
+- O problema principal estava na leitura/renderizacao assíncrona do SVG, nao na URI em si.
+

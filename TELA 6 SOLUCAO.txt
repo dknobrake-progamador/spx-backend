@@ -1,0 +1,58 @@
+TELA 6 - SOLUCAO APLICADA
+Data: 2026-06-05
+
+Objetivo
+- Corrigir a falha em que a Tela 6 aparecia corretamente no login, mas ficava em branco ou mostrava a imagem errada ao sair e voltar para a tela.
+
+Causa raiz encontrada
+- O fluxo da Tela 6 estava sensivel ao ciclo de vida do componente.
+- Havia disputa entre:
+  - leitura do AsyncStorage
+  - carregamento da imagem local
+  - hydrate da nuvem em background
+  - remontagem/reentrada da tela via navegação
+- Em alguns aparelhos, a tela era recriada rapidamente e a imagem podia ser perdida no meio do processo.
+- A variavel de modulo `lastKnownTela6Uri` ajudava, mas nao era suficiente sozinha porque nao sobrevivia bem a todos os reinicios do ciclo da tela.
+
+Solucoes aplicadas
+
+1) Persistencia e recuperacao da imagem local
+- `lib/devStorage.ts` passou a resolver `KEY_TELA6` com leitura local direta quando necessario.
+- Se o `AsyncStorage` tiver a chave, a URI local e usada.
+- Se a chave sumir, o codigo procura o arquivo fisico `tela6.webp`, `tela6.jpg`, `tela6.jpeg` ou `tela6.png` na pasta local e recompõe a chave.
+
+2) Cache local da nuvem
+- `hydrateCurrentUserPhotosFromCloud()` continua baixando as imagens da nuvem.
+- A imagem da Tela 6 e salva localmente para nao depender do download a cada abertura.
+
+3) Ajuste de navegação
+- O login foi organizado para nao competir com o cache da Tela 6.
+- O fluxo de login aguarda a hidratacao da nuvem antes de navegar para a tela inicial do app.
+
+4) Estabilidade da Tela 6
+- `app/tela6.tsx` passou a:
+  - manter a ultima URI valida em memoria
+  - evitar sumir para fallback durante transicoes curtas
+  - usar `PanResponder` estavel com `useRef`
+  - remover leitura duplicada de `AsyncStorage`
+  - evitar bloqueios que cancelavam a primeira carga
+
+5) Exibicao correta
+- A Tela 6 deixou de renderizar a imagem errada enquanto a URI real ainda estava sendo resolvida.
+- Durante a resolucao, a tela pode ficar neutra em vez de trocar para o asset fallback imediatamente.
+
+O que foi validado
+- `npx tsc --noEmit` passou sem erro apos as mudancas.
+- O comportamento da Tela 6 ficou estavel no reaparecimento apos sair e voltar.
+- A imagem correta voltou a permanecer visivel sem depender do fallback indevido.
+
+Arquivos principais envolvidos
+- `app/tela6.tsx`
+- `app/tela10.tsx`
+- `lib/devStorage.ts`
+- `lib/photoCache.ts`
+
+Resumo final
+- O problema nao era uma unica falha.
+- Era a combinacao de ciclo de vida da tela, leitura de cache, carregamento da nuvem e transicao de navegacao.
+- A solucao final estabilizou a resolucao da URI, reduziu corridas de carregamento e fez a Tela 6 manter a imagem correta com mais confianca.

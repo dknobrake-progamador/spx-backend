@@ -46,6 +46,7 @@ function decodeBase64(base64: string) {
 }
 
 async function resolveSvgXml(uri: string) {
+  console.log("[FPP] resolveSvgXml uri:", uri?.slice(-40));
   if (uri.startsWith("data:image/svg+xml")) {
     const payload = uri.slice(uri.indexOf(",") + 1);
     if (uri.includes(";base64,")) {
@@ -54,7 +55,15 @@ async function resolveSvgXml(uri: string) {
     return decodeURIComponent(payload);
   }
 
-  return await FileSystem.readAsStringAsync(uri);
+  try {
+    const response = await fetch(uri);
+    const text = await response.text();
+    console.log("[FPP] fetch OK, tamanho:", text.length);
+    return text;
+  } catch (e) {
+    console.log("[FPP] fetch falhou:", e);
+    return "";
+  }
 }
 
 function extractSvgAspectRatio(svgXml: string) {
@@ -85,6 +94,24 @@ export function FlexiblePhotoPreview({ uri, style, resizeMode = "cover" }: Props
   useEffect(() => {
     let alive = true;
 
+    if (!uri) {
+      console.log("[FPP] uri nula, limpando svgXml");
+      setSvgXml("");
+      return () => {
+        alive = false;
+      };
+    }
+
+    if (!isSvgUri(uri)) {
+      console.log("[FPP] nao e SVG, limpando svgXml");
+      setSvgXml("");
+      return () => {
+        alive = false;
+      };
+    }
+
+    console.log("[FPP] iniciando leitura SVG...");
+
     if (!uri || !isSvgUri(uri)) {
       setSvgXml("");
       return () => {
@@ -95,53 +122,69 @@ export function FlexiblePhotoPreview({ uri, style, resizeMode = "cover" }: Props
     (async () => {
       try {
         const xml = await resolveSvgXml(uri);
-        if (!alive) return;
+        console.log("[FPP] xml resolvido, tamanho:", xml.length, "alive:", alive);
+        if (xml.length === 0) {
+          console.log("[FPP] ERRO: xml vazio, nao vai renderizar");
+        }
         setSvgXml(xml);
-      } catch {
-        if (!alive) return;
+      } catch (e) {
+        console.log("[FPP] ERRO FATAL na leitura SVG:", e);
         setSvgXml("");
       }
     })();
 
     return () => {
+      console.log("[FPP] useEffect CLEANUP - alive=false");
       alive = false;
     };
   }, [uri]);
 
   const svgBox = useMemo(() => {
+    console.log("[FPP] svgBox CALC - svgXml.length:", svgXml.length, "container:", JSON.stringify(containerSize));
     if (!svgXml || containerSize.width <= 0 || containerSize.height <= 0) {
+      if (!svgXml) {
+        console.log("[FPP] svgBox NULL: sem svgXml");
+      } else {
+        console.log("[FPP] svgBox NULL: container invalido", containerSize);
+      }
       return null;
     }
 
     const aspectRatio = extractSvgAspectRatio(svgXml);
     const containerRatio = containerSize.width / containerSize.height;
+    console.log("[FPP] aspectRatio:", aspectRatio, "containerRatio:", containerRatio);
 
     if (containerRatio > aspectRatio) {
-      const height = containerSize.height;
-      const width = height * aspectRatio;
-      return { width, height };
+      const box = { width: containerSize.height * aspectRatio, height: containerSize.height };
+      console.log("[FPP] svgBox calculado (height-bound):", box);
+      return box;
     }
 
-    const width = containerSize.width;
-    const height = width / aspectRatio;
-    return { width, height };
+    const box = { width: containerSize.width, height: containerSize.width / aspectRatio };
+    console.log("[FPP] svgBox calculado (width-bound):", box);
+    return box;
   }, [containerSize.height, containerSize.width, svgXml]);
 
   function handleSvgLayout(event: LayoutChangeEvent) {
     const { width, height } = event.nativeEvent.layout;
+    console.log("[FPP] onLayout DISPAROU:", width, height);
     setContainerSize((current) => {
       if (current.width === width && current.height === height) {
+        console.log("[FPP] onLayout ignorado, mesmo tamanho");
         return current;
       }
+      console.log("[FPP] containerSize atualizado:", width, height);
       return { width, height };
     });
   }
 
   if (!uri) {
+    console.log("[FPP] renderizando View vazia (uri nula)");
     return <View style={style} />;
   }
 
   if (isSvgUri(uri)) {
+    console.log("[FPP] renderizando SVG - svgXml:", !!svgXml, "svgBox:", JSON.stringify(svgBox));
     return (
       <View style={[styles.svgWrap, style]} onLayout={handleSvgLayout}>
         {svgXml && svgBox ? (
@@ -151,11 +194,14 @@ export function FlexiblePhotoPreview({ uri, style, resizeMode = "cover" }: Props
             height={svgBox.height}
             preserveAspectRatio="xMidYMid meet"
           />
-        ) : null}
+        ) : (
+          <View style={{ flex: 1, backgroundColor: "#fff" }} />
+        )}
       </View>
     );
   }
 
+  console.log("[FPP] renderizando Image normal");
   return <Image source={{ uri }} style={style} resizeMode={resizeMode} />;
 }
 

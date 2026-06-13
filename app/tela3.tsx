@@ -1,10 +1,13 @@
-import { MaterialIcons } from "@expo/vector-icons";
-import { Redirect, router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+﻿import { MaterialIcons } from "@expo/vector-icons";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Modal, NativeScrollEvent, NativeSyntheticEvent, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import Svg, { Path, Polyline, Rect } from "react-native-svg";
+import { WebView } from "react-native-webview";
 import { RefreshAnimado, useRefreshAnimado } from "../components/refresh animado";
 import {
   getAllScannedOccurrences,
+  getTela2Variant,
   getTela3OccurrenceCount,
   getScannedOccurrence,
   getTela3PrimaryScreen,
@@ -13,6 +16,9 @@ import {
   type ScannedOccurrence,
   type Tela3PrimaryScreen,
 } from "../lib/devStorage";
+import { getTela2EmRotaTotal } from "../lib/tela2EmRotaMeta";
+import { TELA2_HTML } from "../lib/tela2WebViewHtml";
+import { saveSelectedPedidoInfo } from "../lib/telaPedidoInfoHtml";
 
 const dados = {
   pendente: 0,
@@ -56,15 +62,143 @@ const dados = {
 } as const;
 const MAX_OCORRENCIAS = 15;
 const DEFAULT_OCCURRENCES = 15;
+const EMPTY_STATE_BG = "#eef0f5";
+const TELA2_IMAGE_BASE64 =
+  TELA2_HTML.match(/img\.src = 'data:image\/jpeg;base64,([^']+)'/) ?.[1] ?? "";
+
+const EMPTY_STATE_HTML = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: ${EMPTY_STATE_BG};
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .wrap {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 12px;
+    }
+    canvas {
+      width: 220px;
+      height: auto;
+      display: block;
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="illus"></canvas>
+  </div>
+  <script>
+    (function () {
+      var img = new Image();
+      img.onload = function () {
+        var c = document.getElementById("illus");
+        c.width = img.width;
+        c.height = img.height;
+        var ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        var id = ctx.getImageData(0, 0, c.width, c.height);
+        var d = id.data;
+        for (var i = 0; i < d.length; i += 4) {
+          var r = d[i], g = d[i + 1], b = d[i + 2];
+          if (r > 220 && g > 224 && b > 230 && r < 250 && g < 252 && b < 255) {
+            d[i] = 238;
+            d[i + 1] = 240;
+            d[i + 2] = 245;
+            d[i + 3] = 255;
+          }
+        }
+        ctx.putImageData(id, 0, 0);
+      };
+      img.src = 'data:image/jpeg;base64,${TELA2_IMAGE_BASE64}';
+    })();
+  </script>
+</body>
+</html>`;
+
+function getEncerradoCount() {
+  const min = 2860;
+  const max = 3562;
+  const now = new Date();
+  const seed = Number(
+    String(now.getFullYear()) +
+      String(now.getMonth() + 1).padStart(2, "0") +
+      String(now.getDate()).padStart(2, "0")
+  );
+  const x = Math.sin(seed) * 10000;
+  const rnd = x - Math.floor(x);
+  return Math.floor(rnd * (max - min + 1)) + min;
+}
+
+function DeliveryBadgeIcon() {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+      <Rect x="3.25" y="7.6" width="17.5" height="11.8" rx="2.2" stroke="#687487" strokeWidth="1.8" />
+      <Path d="M5.2 7.6 7.15 4.9h9.7l1.95 2.7" stroke="#687487" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M12 16.6v-5.8" stroke="#687487" strokeWidth="1.8" strokeLinecap="round" />
+      <Polyline points="9.5,13.2 12,10.7 14.5,13.2" stroke="#687487" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
 
 export default function Tela3() {
   const params = useLocalSearchParams<{ editCount?: string }>();
   const [telaPrincipal, setTelaPrincipal] = useState<Tela3PrimaryScreen | null>(null);
+  const [emRotaLabelCount, setEmRotaLabelCount] = useState<number>(dados.pendente);
   const [ocorrenciasCapturadas, setOcorrenciasCapturadas] = useState<Record<number, ScannedOccurrence>>({});
   const [quantidadeOcorrencias, setQuantidadeOcorrencias] = useState<number>(DEFAULT_OCCURRENCES);
   const [modalQuantidadeVisivel, setModalQuantidadeVisivel] = useState(false);
   const [quantidadeInput, setQuantidadeInput] = useState(String(DEFAULT_OCCURRENCES));
   const refreshAnimado = useRefreshAnimado();
+  const scrollOffsetYRef = useRef(0);
+  const lastCustomRefreshAtRef = useRef(0);
+  const encerradoCount = getEncerradoCount();
+  const swipePanResponder = PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) =>
+      (Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 8 &&
+        Math.abs(gestureState.dx) > 16) ||
+      (gestureState.dy > Math.abs(gestureState.dx) + 8 &&
+        gestureState.dy > 16),
+    onPanResponderRelease: (_, gestureState) => {
+      if (gestureState.dx >= 24) {
+        router.push("/tela2");
+        return;
+      }
+
+      if (gestureState.dx <= -24) {
+        router.push("/tela9");
+        return;
+      }
+
+      if (
+        gestureState.dy >= 28 &&
+        Math.abs(gestureState.dx) <= 32 &&
+        scrollOffsetYRef.current <= 0
+      ) {
+        const now = Date.now();
+        if (now - lastCustomRefreshAtRef.current > 650) {
+          lastCustomRefreshAtRef.current = now;
+          onRefresh();
+        }
+      }
+    },
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -72,6 +206,8 @@ export default function Tela3() {
 
       async function carregarOcorrenciasCapturadas() {
         const principal = await getTela3PrimaryScreen();
+        const tela2Variant = await getTela2Variant();
+        const emRotaTotal = await getTela2EmRotaTotal();
         const ocorrenciasPorIndice = await getAllScannedOccurrences();
         const ocorrenciasPorLeituraDireta = await Promise.all(
           Array.from({ length: MAX_OCORRENCIAS }, (_, index) => getScannedOccurrence(index))
@@ -87,6 +223,9 @@ export default function Tela3() {
 
         if (ativo) {
           setTelaPrincipal(principal);
+          setEmRotaLabelCount(
+            tela2Variant === "em-rota" ? emRotaTotal : dados.pendente
+          );
           setQuantidadeOcorrencias(quantidadeSalva);
           setOcorrenciasCapturadas(
             fallbackPrimeiroCard && !ocorrenciasMescladas[0]
@@ -124,18 +263,18 @@ export default function Tela3() {
     if (capturada) {
       return {
         codigo: capturada.codigo || `SEM CODIGO ${index + 1}`,
-        endereco: capturada.endereco?.trim() || "Endereco da ocorrencia",
+        endereco: capturada.endereco?.trim() || "Endereço da ocorrência",
         pessoa: capturada.pessoa?.trim() || "Pessoa nao informada",
-        status: capturada.status?.trim() || "Ocorrencia pendente",
+        status: capturada.status?.trim() || "Ocorrência pendente",
         data: capturada.statusDate?.trim() || "--",
       };
     }
 
     return {
       codigo: `SEM CODIGO ${index + 1}`,
-      endereco: "Endereco da ocorrencia",
+      endereco: "Endereço da ocorrência",
       pessoa: "Pessoa nao informada",
-      status: "Ocorrencia pendente",
+      status: "Ocorrência pendente",
       data: "--",
     };
   });
@@ -147,6 +286,10 @@ export default function Tela3() {
 
   function onRefresh() {
     refreshAnimado.iniciarAnimacao();
+  }
+
+  function onScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    scrollOffsetYRef.current = event.nativeEvent.contentOffset.y;
   }
 
   function abrirEditorQuantidade() {
@@ -180,12 +323,8 @@ export default function Tela3() {
     return <View style={styles.screen} />;
   }
 
-  if (telaPrincipal === "tela30") {
-    return <Redirect href="/tela3-imagem" />;
-  }
-
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} {...swipePanResponder.panHandlers}>
       <View style={styles.statusbar} />
 
       <View style={styles.topbar}>
@@ -197,7 +336,7 @@ export default function Tela3() {
           </Pressable>
 
           <View style={styles.brandPill}>
-            <MaterialIcons name="inventory-2" size={18} color="#555" />
+            <DeliveryBadgeIcon />
             <Text style={styles.brandText}>Entrega</Text>
           </View>
         </View>
@@ -215,73 +354,107 @@ export default function Tela3() {
 
       <View style={styles.tabs}>
         <Pressable onPress={() => router.push("/tela2")} style={styles.tab}>
-          <Text style={styles.tabText}>Pendente ({dados.pendente})</Text>
+          <Text style={styles.tabText}>Em Rota ({emRotaLabelCount})</Text>
         </Pressable>
 
         <Pressable onLongPress={abrirEditorQuantidade} delayLongPress={3000} style={[styles.tab, styles.activeTab]}>
-          <Text style={styles.activeTabText}>Ocorrencia ({ocorrencias.length})</Text>
+          <Text style={styles.activeTabText}>Ocorrência ({ocorrencias.length})</Text>
           <View style={styles.activeUnderline} />
         </Pressable>
 
         <Pressable onPress={() => router.push("/tela9")} style={styles.tab}>
-          <Text style={styles.tabText}>Encerrado</Text>
+          <Text style={styles.tabText}>Encerrado ({encerradoCount})</Text>
         </Pressable>
       </View>
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          ocorrencias.length === 0 && styles.contentEmpty,
+        ]}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={false}
-            onRefresh={onRefresh}
-            colors={["transparent"]}
-            progressBackgroundColor="transparent"
-            tintColor="transparent"
-            titleColor="transparent"
-            progressViewOffset={-120}
-          />
-        }
+        overScrollMode="never"
+        onScroll={onScroll}
+        scrollEventThrottle={16}
       >
-        {ocorrencias.map((item, index) => (
-          <Pressable
-            key={`${item.codigo}-${index}`}
-            onLongPress={() =>
-              router.push({
-                pathname: "/tela13",
-                params: { index: String(index) },
-              })
-            }
-            delayLongPress={2500}
-            style={styles.card}
-          >
-            <View style={styles.cardIdRow}>
-              <Text style={styles.cardId}>{item.codigo}</Text>
-              <MaterialIcons name="content-copy" size={16} color="#888" />
-            </View>
-
-            <View style={styles.addrRow}>
-              <MaterialIcons
-                name="location-on"
-                size={15}
-                color="#777"
-                style={styles.pinIcon}
-              />
-              <Text style={styles.addrText}>{item.endereco}</Text>
-            </View>
-
-            <Text style={styles.person}>{item.pessoa}</Text>
-
-            <View style={styles.statusRow}>
-              <View style={styles.statusDot}>
-                <View style={styles.statusDash} />
+        {ocorrencias.length === 0 ? (
+          <View style={styles.emptyStateWrap}>
+            <WebView
+              source={{ html: EMPTY_STATE_HTML }}
+              originWhitelist={["*"]}
+              scrollEnabled={false}
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
+              overScrollMode="never"
+              style={styles.emptyStateWebView}
+              containerStyle={styles.emptyStateWebView}
+              androidLayerType="software"
+            />
+          </View>
+        ) : (
+          ocorrencias.map((item, index) => (
+            <Pressable
+              key={`${item.codigo}-${index}`}
+              onPress={() => {
+                void saveSelectedPedidoInfo({
+                  num: String(index + 1),
+                  sequenceValue: null,
+                  stopValue: null,
+                  code: item.codigo,
+                  atId: "",
+                  address: item.endereco,
+                  recipient: item.pessoa,
+                  phone: "",
+                  hub: "LM Hub_RJ_Sao Goncalo_02",
+                  district: "",
+                  city: "",
+                  zipcode: "",
+                  latitude: "",
+                  longitude: "",
+                  tags: [item.status, item.data].filter(Boolean),
+                  sourceType: "occurrence",
+                }).then(() => {
+                  router.push("/pedido-info");
+                });
+              }}
+              onLongPress={() =>
+                router.push({
+                  pathname: "/tela13",
+                  params: { index: String(index) },
+                })
+              }
+              delayLongPress={2500}
+              style={styles.card}
+            >
+              <View style={styles.cardIdRow}>
+                <Text style={styles.cardId}>{item.codigo}</Text>
+                <MaterialIcons name="content-copy" size={16} color="#888" />
               </View>
-              <Text style={styles.statusText}>{item.status}</Text>
-              <Text style={styles.statusDate}>{item.data}</Text>
-            </View>
-          </Pressable>
-        ))}
+
+              <View style={styles.addrRow}>
+                <MaterialIcons
+                  name="location-on"
+                  size={15}
+                  color="#777"
+                  style={styles.pinIcon}
+                />
+                <Text style={styles.addrText}>{item.endereco}</Text>
+              </View>
+
+              <Text style={styles.person}>{item.pessoa}</Text>
+
+              <View style={styles.statusRow}>
+                <View style={styles.statusDot}>
+                  <View style={styles.statusDash} />
+                </View>
+                <Text style={styles.statusText}>{item.status}</Text>
+                <Text style={styles.statusDate}>{item.data}</Text>
+              </View>
+            </Pressable>
+          ))
+        )}
       </ScrollView>
 
       <RefreshAnimado
@@ -293,7 +466,7 @@ export default function Tela3() {
       <Modal visible={modalQuantidadeVisivel} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitulo}>Quantidade de ocorrencias</Text>
+            <Text style={styles.modalTitulo}>Quantidade de ocorrências</Text>
             <TextInput
               value={quantidadeInput}
               onChangeText={setQuantidadeInput}
@@ -319,7 +492,7 @@ export default function Tela3() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#f0f0f0",
+    backgroundColor: EMPTY_STATE_BG,
   },
 
   statusbar: {
@@ -336,8 +509,6 @@ const styles = StyleSheet.create({
     paddingRight: 16,
     paddingBottom: 12,
     paddingLeft: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e5e5",
   },
 
   topbarLeft: {
@@ -364,13 +535,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#f2f2f2",
     borderRadius: 20,
     paddingVertical: 6,
-    paddingHorizontal: 14,
+    paddingLeft: 12,
+    paddingRight: 14,
   },
 
   brandText: {
     fontSize: 15,
     fontWeight: "500",
-    color: "#222",
+    color: "#687487",
   },
 
   topbarRight: {
@@ -434,11 +606,33 @@ const styles = StyleSheet.create({
 
   scroll: {
     flex: 1,
+    backgroundColor: EMPTY_STATE_BG,
   },
 
   content: {
     padding: 12,
+    paddingBottom: 72,
     gap: 10,
+    backgroundColor: EMPTY_STATE_BG,
+  },
+
+  contentEmpty: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
+
+  emptyStateWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 0,
+    paddingBottom: 72,
+    backgroundColor: EMPTY_STATE_BG,
+  },
+
+  emptyStateWebView: {
+    width: 260,
+    height: 220,
+    backgroundColor: EMPTY_STATE_BG,
   },
 
   card: {
@@ -565,3 +759,4 @@ const styles = StyleSheet.create({
     color: "#e85d2a",
   },
 });
+

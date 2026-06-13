@@ -17,14 +17,12 @@ import {
 } from "react-native";
 import { apiRequest } from "../lib/apiClient";
 import {
-  getPlacaUri,
-  getTela11Uri,
-  getTela6Uri,
   hydrateCurrentUserPhotosFromCloud,
   setAuthSession,
 } from "../lib/devStorage";
 
 const LAST_PHONE_KEY = "spx_last_phone";
+const LAST_PASSWORD_KEY = "spx_last_password";
 
 type AuthResponse = {
   ok: boolean;
@@ -80,19 +78,18 @@ export default function Tela10() {
   const largePhone = width >= 410 && width < 768;
 
   useEffect(() => {
-    AsyncStorage.getItem(LAST_PHONE_KEY)
-      .then((saved) => {
-        if (saved) setPhone(formatPhoneDisplay(saved));
+    Promise.all([
+      AsyncStorage.getItem(LAST_PHONE_KEY),
+      AsyncStorage.getItem(LAST_PASSWORD_KEY),
+    ])
+      .then(([savedPhone, savedPassword]) => {
+        if (savedPhone) setPhone(formatPhoneDisplay(savedPhone));
+        if (savedPassword) setPassword(savedPassword);
       })
       .catch(() => undefined);
   }, []);
 
-  async function hasRequiredPhotos() {
-    const [u4, u6, u11] = await Promise.all([getPlacaUri(), getTela6Uri(), getTela11Uri()]);
-    return !!u4 && !!u6 && !!u11;
-  }
-
-  async function finishAuth(data: AuthResponse) {
+  async function finishAuth(data: AuthResponse, loginPassword: string) {
     setStatus("");
     await setAuthSession({
       phone: data.phone,
@@ -103,6 +100,7 @@ export default function Tela10() {
       mustChangePassword: data.mustChangePassword === true,
     });
     await AsyncStorage.setItem(LAST_PHONE_KEY, data.phone);
+    await AsyncStorage.setItem(LAST_PASSWORD_KEY, loginPassword);
     setPassword("");
 
     if (data.mustChangePassword) {
@@ -110,23 +108,18 @@ export default function Tela10() {
       return;
     }
 
-    try {
-      await hydrateCurrentUserPhotosFromCloud();
-    } catch (error) {
-      console.log("LOGIN_FLOW", "cloud_hydrate_failed", error);
-    }
-
     if (data.editMode) {
       router.replace("/upload-fotos");
       return;
     }
 
-    if (await hasRequiredPhotos()) {
-      router.replace("/tela6");
-      return;
+    try {
+      await hydrateCurrentUserPhotosFromCloud({ force: true });
+    } catch (error) {
+      console.log("LOGIN_FLOW", "cloud_hydrate_failed", error);
     }
 
-    router.replace("/upload-fotos");
+    router.replace("/facial-verification");
   }
 
   async function submit(mode: "login" | "register") {
@@ -151,7 +144,7 @@ export default function Tela10() {
         return;
       }
 
-      await finishAuth(data);
+      await finishAuth(data, cleanPassword);
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : "";
       const isConnectionError =
@@ -372,4 +365,3 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
 });
-

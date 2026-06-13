@@ -1,0 +1,103 @@
+SOLUCAO USADA PARA CORRECAO DA PLACA E DA TELA 6
+
+Data do registro: 05/06/2026
+
+Objetivo:
+Registrar a solucao que ficou funcionando para a tela de placa e para a tela 6,
+para evitar alterar novamente partes que ja estao funcionando.
+
+
+1. CORRECAO DA PLACA
+
+Arquivo:
+app/placa.tsx
+
+Problema:
+A tela da placa ficava branca em alguns casos porque a exibicao dependia do
+perfil antigo 007/008. Quando o perfil apontava para uma placa que nao existia,
+a tela nao encontrava uma imagem valida para exibir.
+
+Solucao aplicada:
+- Remover a dependencia da exibicao da placa em 007/008.
+- Usar o estado direto de "Placa 2 ativa" com:
+  - getPlaca2Active()
+  - setPlaca2Active()
+- Manter as duas placas.
+- Manter a troca por longpress.
+- Fazer fallback automatico entre Placa 1 e Placa 2.
+
+Regra atual da placa:
+- Se Placa 2 estiver ativa e existir, exibe Placa 2.
+- Se Placa 2 estiver ativa mas nao existir, volta para Placa 1.
+- Se Placa 1 existir, exibe Placa 1.
+- Se Placa 1 nao existir mas Placa 2 existir, ativa e exibe Placa 2.
+- Se nenhuma existir, mostra estado de imagem nao encontrada.
+
+Configuracao do longpress:
+- delayLongPress = 2000
+- hitSlop = 24
+- pressRetentionOffset = 32
+
+Resultado:
+A tela da placa voltou a exibir imagem e a troca entre Placa 1 e Placa 2
+continua funcionando por longpress.
+
+
+2. CORRECAO DA TELA 6
+
+Arquivo:
+app/tela6.tsx
+lib/devStorage.ts
+
+Problema:
+A tela 6 nao deve depender da imagem padrao do projeto como fonte principal.
+A fonte correta e a imagem da nuvem do usuario. No primeiro login, a imagem da
+nuvem deve ser baixada/copieda para o armazenamento interno do app. Depois disso,
+a tela 6 deve usar esse arquivo local baixado, sem depender da nuvem toda hora.
+
+Solucao aplicada:
+- No login, hydrateCurrentUserPhotosFromCloud baixa as fotos da nuvem e salva
+  em FileSystem.documentDirectory/.secure-dev-images/.
+- A hidratacao agora aceita:
+  - data:image/...;base64
+  - URL http/https da nuvem
+  - file:// local
+- A tela 6 primeiro chama getTela6Uri() para ler o arquivo local baixado.
+- A tela 6 usa useFocusEffect para reler esse arquivo toda vez que volta ao foco
+  depois de abrir outra tela, como a Tela 2.
+- A tela 6 nao deve retornar uma View branca enquanto espera nuvem. Se ainda nao
+  houver URI local, renderiza fallback imediatamente e hidrata a nuvem em segundo plano.
+- Se ainda nao existir arquivo local, a tela 6 tenta hydrateCurrentUserPhotosFromCloud()
+  silenciosamente e depois chama getTela6Uri() de novo.
+- Se a imagem local falhar ao renderizar, a tela 6 forca uma nova hidratacao da nuvem.
+- Nao redirecionar para upload-fotos dentro da tela 6.
+- Usar assets/images/tela6.jpg somente como ultimo fallback de emergencia para
+  evitar tela branca permanente quando nao houver arquivo local nem resposta da nuvem.
+
+Regra atual da tela 6:
+- Fonte principal: arquivo local baixado da nuvem.
+- Primeiro login: baixa da nuvem e grava localmente.
+- Proximas aberturas: usa o arquivo local salvo, sem baixar de novo.
+- Ao voltar da Tela 2 para a Tela 6: reler o arquivo local e forcar nova
+  renderizacao da imagem.
+- Nunca bloquear a renderizacao da Tela 6 aguardando download da nuvem.
+- Se nao houver arquivo local: tenta nuvem silenciosamente.
+- Se a nuvem/local falharem: usa assets/images/tela6.jpg apenas como fallback.
+- A tela 6 nao decide fluxo de upload.
+
+Resultado:
+A tela 6 prioriza a imagem real do usuario vinda da nuvem, salva essa imagem no
+aparelho para uso futuro e nao fica dependente de download da nuvem toda hora.
+O fallback do projeto existe apenas para impedir tela branca se a nuvem/local
+falharem.
+
+
+OBSERVACAO IMPORTANTE
+
+Nao alterar a tela 6 para redirecionar automaticamente.
+Nao transformar assets/images/tela6.jpg em fonte principal da tela 6.
+Manter a ordem correta: nuvem -> download local -> uso local futuro -> fallback
+somente em emergencia.
+Nao recolocar 007/008 como base da exibicao da placa.
+Se precisar ajustar placa ou tela 6 no futuro, mexer somente no ponto exato
+do problema e preservar estas regras.

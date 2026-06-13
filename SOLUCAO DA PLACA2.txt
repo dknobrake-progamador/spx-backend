@@ -1,0 +1,19 @@
+SOLUCAO DA PLACA 2
+
+Resumo da correção aplicada:
+- A leitura da placa 2 passou a aceitar `@DEV_PLACA_2_ACTIVE` como `"true"` ou `"1"`.
+- A tela da placa foi ajustada para ler direto do AsyncStorage:
+  - `@DEV_PLACA_URI`
+  - `@DEV_PLACA_2_URI`
+  - `@DEV_PLACA_2_ACTIVE`
+- O preview SVG foi simplificado para usar `fetch(uri)` ao carregar o SVG local.
+- A renderização da placa 2 voltou a funcionar no celular novo.
+
+Solução mais recente aplicada:
+- O estado da placa 2 não depende mais só do valor textual `"true"`.
+- Se `@DEV_PLACA_2_ACTIVE` vier como `"1"`, o app também entende que a placa 2 está ativa.
+- O `FlexiblePhotoPreview` deixou de tentar caminhos mais pesados de leitura e passou a buscar o SVG direto com `fetch()`, o que evitou o branco na tela.
+
+Arquivos envolvidos:
+- `app/placa.tsx`
+- `components/flexible-photo-preview.tsx`
