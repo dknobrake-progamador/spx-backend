@@ -380,6 +380,33 @@ async function deletePhotoFiles(fields = {}) {
   }
 }
 
+async function deletePhotoFileByKey(fields = {}, key) {
+  if (!PHOTO_KEYS.includes(key)) return false;
+  const path = fields[`${key}Path`];
+  if (!path) return false;
+
+  const bucketNames = Array.from(
+    new Set([fields[`${key}Bucket`], ...getStorageBucketCandidates()].filter(Boolean))
+  );
+
+  for (const bucketName of bucketNames) {
+    try {
+      const bucket = admin.storage().bucket(bucketName);
+      const file = bucket.file(path);
+      const [exists] = await file.exists();
+      if (!exists) continue;
+      await file.delete();
+      return true;
+    } catch (error) {
+      if (!isBucketMissingError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  return false;
+}
+
 function buildPhotoStatus(fields = {}) {
   const hasPlaca = !!fields.placaPath;
   const hasTela6 = !!fields.tela6Path;
@@ -1222,6 +1249,86 @@ app.get("/admin/audit", requireMaster, async (_req, res) => {
     console.error(error);
     return res.status(500).json({
       error: "Falha ao carregar historico administrativo",
+      details: String(error.message || error),
+    });
+  }
+});
+
+app.post("/admin/users/:uid/reset-face", requireAdmin, async (req, res) => {
+  try {
+    const uid = String(req.params.uid || "").trim();
+    if (!uid) {
+      return res.status(400).json({ error: "Usuario invalido." });
+    }
+
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: "Usuario nao encontrado." });
+    }
+
+    const currentData = userSnap.data() || {};
+    if (!ensureCanManageTarget(req, res, uid, currentData)) {
+      return;
+    }
+
+    const photoRef = db.collection("userPhotos").doc(uid);
+    const photoSnap = await photoRef.get();
+    const photoData = photoSnap.exists ? photoSnap.data() || {} : {};
+    const hadProfileFace = !!photoData.profileFacePath;
+    const deletedFile = await deletePhotoFileByKey(photoData, "profileFace");
+    const nowIso = new Date().toISOString();
+
+    if (photoSnap.exists) {
+      await photoRef.set(
+        {
+          profileFacePath: admin.firestore.FieldValue.delete(),
+          profileFaceMimeType: admin.firestore.FieldValue.delete(),
+          profileFaceBucket: admin.firestore.FieldValue.delete(),
+          faceResetAtIso: nowIso,
+          updatedAtIso: nowIso,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } else {
+      await photoRef.set(
+        {
+          uid,
+          phone: uid,
+          faceResetAtIso: nowIso,
+          updatedAtIso: nowIso,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    const nextPhotoData = { ...photoData };
+    delete nextPhotoData.profileFacePath;
+    delete nextPhotoData.profileFaceMimeType;
+    delete nextPhotoData.profileFaceBucket;
+    nextPhotoData.updatedAtIso = nowIso;
+
+    await writeAdminAudit(req.user?.uid, "reset_profile_face", uid, {
+      phone: currentData.phone || uid,
+      hadProfileFace,
+      deletedFile,
+    });
+
+    return res.json({
+      ok: true,
+      uid,
+      cleared: true,
+      hadProfileFace,
+      deletedFile,
+      ...buildPhotoStatus(nextPhotoData),
+      updatedAtIso: nowIso,
+    });
+  } catch (error) {
+    console.error("[ADMIN] reset_face_error", error);
+    return res.status(500).json({
+      error: "Falha ao apagar rosto",
       details: String(error.message || error),
     });
   }
