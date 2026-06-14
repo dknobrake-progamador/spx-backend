@@ -701,6 +701,83 @@ app.patch("/me/occurrence-count", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/me/driver-hub", requireAuth, async (req, res) => {
+  try {
+    const uid = String(req.user?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "Sessao invalida." });
+    }
+
+    const [photoSnap, userSnap] = await Promise.all([
+      db.collection("userPhotos").doc(uid).get(),
+      db.collection("users").doc(uid).get(),
+    ]);
+    const photoData = photoSnap.exists ? photoSnap.data() || {} : {};
+    const userData = userSnap.exists ? userSnap.data() || {} : {};
+    const driverHubName = cleanPhotoMetadataValue(
+      photoData.driverHubName || userData.driverHubName || "",
+      160
+    );
+
+    return res.json({
+      ok: true,
+      driverHubName,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao carregar Hub." });
+  }
+});
+
+app.put("/me/driver-hub", requireAuth, async (req, res) => {
+  try {
+    const uid = String(req.user?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "Sessao invalida." });
+    }
+
+    const driverHubName = cleanPhotoMetadataValue(
+      req.body?.driverHubName || req.body?.hubName || "",
+      160
+    );
+    const nowIso = new Date().toISOString();
+    const firestoreHubValue =
+      driverHubName || admin.firestore.FieldValue.delete();
+
+    await Promise.all([
+      db.collection("userPhotos").doc(uid).set(
+        {
+          uid,
+          phone: uid,
+          driverHubName: firestoreHubValue,
+          metadataUpdatedAtIso: nowIso,
+          updatedAtIso: nowIso,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      ),
+      db.collection("users").doc(uid).set(
+        {
+          driverHubName: firestoreHubValue,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      ),
+    ]);
+
+    return res.json({
+      ok: true,
+      driverHubName,
+      updatedAtIso: nowIso,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao salvar Hub.",
+      details: String(error.message || error),
+    });
+  }
+});
 app.get("/admin/users", requireAdmin, async (_req, res) => {
   try {
     const snap = await db.collection("users").orderBy("phone").get();
