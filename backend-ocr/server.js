@@ -53,20 +53,23 @@ function normalizeToLocalBrPhone(raw = "") {
 }
 
 function resolveRole(userData = {}, uid = "") {
+  const storedRole = String(userData.role || "").trim().toLowerCase();
   if (
     normalizeToLocalBrPhone(uid) === MASTER_LOGIN ||
     normalizeToLocalBrPhone(userData.phone || "") === MASTER_LOGIN
   ) {
     return "master";
   }
-  if (userData.role === "admin2") return "admin2";
+  if (storedRole === "admin2" || storedRole === "admin" || storedRole === "adm") {
+    return "admin2";
+  }
   return "user";
 }
 
 function resolveCanUploadPhotos(userData = {}) {
   if (userData.canUploadPhotos === true) return true;
   if (resolveRole(userData, userData.uid || userData.phone || "") === "master") return true;
-  if (userData.role === "admin2") return true;
+  if (resolveRole(userData, userData.uid || userData.phone || "") === "admin2") return true;
   return false;
 }
 
@@ -210,7 +213,14 @@ async function requireAdmin(req, res, next) {
     const uid = req.user?.uid || "";
     const adminSnap = await db.collection("users").doc(uid).get();
     const adminData = adminSnap.exists ? adminSnap.data() || {} : {};
-    const resolvedRole = resolveRole(adminData, uid);
+    const tokenRole = String(req.user?.role || "").trim();
+    const resolvedRole = resolveRole(
+      {
+        ...adminData,
+        role: adminData.role || tokenRole,
+      },
+      uid
+    );
     if (resolvedRole === "master") {
       req.adminAccess = "master";
       return next();
@@ -354,6 +364,73 @@ async function downloadPhotoDataUrl(path, mimeType, storedBucketName) {
   return "";
 }
 
+function decodeXmlEntities(value = "") {
+  return String(value || "")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+}
+
+function extractDriverDisplayNameFromPlateSvg(svg = "") {
+  const match = String(svg || "").match(
+    /<text\b(?=[^>]*font-size="22")(?=[^>]*font-weight="600")[^>]*>([\s\S]*?)<\/text>/i
+  );
+  return decodeXmlEntities(match?.[1] || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+async function readStoredSvgText(path, mimeType, storedBucketName) {
+  if (!path) return "";
+  const looksLikeSvg =
+    String(mimeType || "").toLowerCase().includes("svg") ||
+    String(path || "").toLowerCase().endsWith(".svg");
+  if (!looksLikeSvg) return "";
+
+  const bucketNames = Array.from(
+    new Set([storedBucketName, ...getStorageBucketCandidates()].filter(Boolean))
+  );
+
+  for (const bucketName of bucketNames) {
+    try {
+      const bucket = admin.storage().bucket(bucketName);
+      const file = bucket.file(path);
+      const [exists] = await file.exists();
+      if (!exists) continue;
+      const [buffer] = await file.download();
+      return buffer.toString("utf8");
+    } catch (error) {
+      if (!isBucketMissingError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  return "";
+}
+
+async function resolveDriverDisplayName(userData = {}, photoData = {}) {
+  const storedName = String(photoData.driverDisplayName || userData.driverDisplayName || "")
+    .trim()
+    .toUpperCase();
+  if (storedName) return storedName;
+
+  for (const key of ["placa", "placa2"]) {
+    const svg = await readStoredSvgText(
+      photoData[`${key}Path`],
+      photoData[`${key}MimeType`],
+      photoData[`${key}Bucket`]
+    );
+    const extractedName = extractDriverDisplayNameFromPlateSvg(svg);
+    if (extractedName) return extractedName;
+  }
+
+  return "";
+}
+
 async function deletePhotoFiles(fields = {}) {
   for (const key of PHOTO_KEYS) {
     const path = fields[`${key}Path`];
@@ -442,21 +519,54 @@ function normalizePhotoMetadata(raw = {}) {
   const metadata = {};
   const driverDisplayName = cleanPhotoMetadataValue(source.driverDisplayName, 120).toUpperCase();
   const driverVehicleType = cleanPhotoMetadataValue(source.driverVehicleType, 40).toUpperCase();
+  const driverHubName = cleanPhotoMetadataValue(source.driverHubName, 160);
   const driverCnhNumber = String(source.driverCnhNumber || "").replace(/\D/g, "").slice(0, 11);
   const registrationMode = cleanPhotoMetadataValue(source.registrationMode, 40);
 
   if (driverDisplayName) metadata.driverDisplayName = driverDisplayName;
   if (driverVehicleType) metadata.driverVehicleType = driverVehicleType;
+  if (driverHubName) metadata.driverHubName = driverHubName;
   if (/^\d{11}$/.test(driverCnhNumber)) metadata.driverCnhNumber = driverCnhNumber;
   if (registrationMode) metadata.registrationMode = registrationMode;
 
   return metadata;
 }
 
+function normalizeOccurrenceItem(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const codigo = cleanPhotoMetadataValue(source.codigo || source.code || "", 80).toUpperCase();
+  if (!codigo) return null;
+
+  return {
+    codigo,
+    endereco: cleanPhotoMetadataValue(source.endereco || source.address || "", 240) || null,
+    pessoa: cleanPhotoMetadataValue(source.pessoa || source.recipient || "", 160) || null,
+    hub: cleanPhotoMetadataValue(source.hub || "", 160) || null,
+    status: cleanPhotoMetadataValue(source.status || "", 80) || null,
+    statusDate: cleanPhotoMetadataValue(source.statusDate || source.data || "", 60) || null,
+    raw: cleanPhotoMetadataValue(source.raw || "", 2000) || null,
+    scanType: cleanPhotoMetadataValue(source.scanType || "", 40) || null,
+  };
+}
+
+function normalizeOccurrencesList(raw = []) {
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : [])
+    .map(normalizeOccurrenceItem)
+    .filter(Boolean)
+    .filter((item) => {
+      if (seen.has(item.codigo)) return false;
+      seen.add(item.codigo);
+      return true;
+    })
+    .slice(0, 15);
+}
+
 function buildPhotoMetadata(fields = {}) {
   return {
     driverDisplayName: String(fields.driverDisplayName || ""),
     driverVehicleType: String(fields.driverVehicleType || ""),
+    driverHubName: String(fields.driverHubName || ""),
     driverCnhNumber: String(fields.driverCnhNumber || ""),
     registrationMode: String(fields.registrationMode || ""),
   };
@@ -607,6 +717,18 @@ app.post("/auth/login", async (req, res) => {
     const canUploadPhotos = resolveCanUploadPhotos(data);
     const editScope = resolveEditScope(data);
     const editMode = editScope !== "none";
+    let photoStatus = buildPhotoStatus({});
+    try {
+      const photoSnap = await db.collection("userPhotos").doc(uid).get();
+      if (photoSnap.exists) {
+        photoStatus = buildPhotoStatus(photoSnap.data() || {});
+      }
+    } catch (error) {
+      console.log("[AUTH_LOGIN] photo_status_failed", {
+        uid,
+        error: String((error && error.message) || error),
+      });
+    }
     const claims = role === "master" ? { role, adminMaster: true, canUploadPhotos } : { role, canUploadPhotos };
     const customToken = await admin.auth().createCustomToken(uid, claims);
     const tokenPayload = await exchangeCustomTokenForIdToken(customToken);
@@ -637,6 +759,13 @@ app.post("/auth/login", async (req, res) => {
       editMode,
       editScope,
       mustChangePassword: resolveMustChangePassword(data),
+      registrationComplete: photoStatus.requiredComplete,
+      hasPlaca: photoStatus.hasPlaca,
+      hasTela6: photoStatus.hasTela6,
+      hasTela11: photoStatus.hasTela11,
+      hasPlaca2: photoStatus.hasPlaca2,
+      hasProfileFace: photoStatus.hasProfileFace,
+      generationMode: photoStatus.generationMode,
       customToken,
       idToken: tokenPayload.idToken,
       refreshToken: tokenPayload.refreshToken,
@@ -778,30 +907,115 @@ app.put("/me/driver-hub", requireAuth, async (req, res) => {
     });
   }
 });
+
+app.get("/me/occurrences", requireAuth, async (req, res) => {
+  try {
+    const uid = String(req.user?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "Sessao invalida." });
+    }
+
+    const userSnap = await db.collection("users").doc(uid).get();
+    const data = userSnap.exists ? userSnap.data() || {} : {};
+    return res.json({
+      ok: true,
+      occurrences: normalizeOccurrencesList(data.occurrences || []),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao carregar ocorrencias." });
+  }
+});
+
+app.put("/me/occurrences", requireAuth, async (req, res) => {
+  try {
+    const uid = String(req.user?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "Sessao invalida." });
+    }
+
+    const occurrences = normalizeOccurrencesList(req.body?.occurrences || []);
+    await db.collection("users").doc(uid).set(
+      {
+        occurrences,
+        occurrencesUpdatedAtIso: new Date().toISOString(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return res.json({
+      ok: true,
+      occurrences,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Falha ao salvar ocorrencias." });
+  }
+});
+
+async function loadAdminUsersForRequest(req) {
+    const [snap, photoSnap] = await Promise.all([
+      db.collection("users").get(),
+      db.collection("userPhotos").get(),
+    ]);
+    const photoMetadataByUid = new Map(
+      photoSnap.docs.map((doc) => [doc.id, doc.data() || {}])
+    );
+    const users = (await Promise.all(
+      snap.docs.map(async (doc) => {
+        const data = doc.data() || {};
+        const photoData = photoMetadataByUid.get(doc.id) || {};
+        const editScope = resolveEditScope(data);
+        const loginHistory = normalizeLoginHistoryItems(data.loginHistory);
+        return {
+          uid: doc.id,
+          phone: data.phone || doc.id,
+          driverDisplayName: await resolveDriverDisplayName(data, photoData),
+          role: resolveRole(data, doc.id),
+          active: data.active !== false,
+          editMode: editScope !== "none",
+          editScope,
+          mustChangePassword: resolveMustChangePassword(data),
+          canUploadPhotos: resolveCanUploadPhotos(data),
+          lastLoginAtIso: data.lastLoginAtIso || "",
+          loginHistory,
+        };
+      })
+    ))
+      .filter((user) => (req.adminAccess === "master" ? true : user.role !== "master"))
+      .sort((left, right) => String(left.phone || left.uid).localeCompare(String(right.phone || right.uid)));
+
+    return users;
+}
+
 app.get("/admin/users", requireAdmin, async (_req, res) => {
   try {
-    const snap = await db.collection("users").orderBy("phone").get();
-    const users = snap.docs.map((doc) => {
-      const data = doc.data() || {};
-      const loginHistory = normalizeLoginHistoryItems(data.loginHistory);
-      return {
-        uid: doc.id,
-        phone: data.phone || doc.id,
-        role: resolveRole(data, doc.id),
-        active: data.active !== false,
-        editMode: resolveEditScope(data) !== "none",
-        editScope: resolveEditScope(data),
-        mustChangePassword: resolveMustChangePassword(data),
-        canUploadPhotos: resolveCanUploadPhotos(data),
-        lastLoginAtIso: data.lastLoginAtIso || "",
-        loginHistory,
-      };
-    }).filter((user) => (_req.adminAccess === "master" ? true : user.role !== "master"));
-
+    const users = await loadAdminUsersForRequest(_req);
     return res.json({ ok: true, users });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: "Falha ao listar usuarios", details: String(error.message || error) });
+  }
+});
+
+app.get("/admin/user-display-names", requireAdmin, async (req, res) => {
+  try {
+    const users = await loadAdminUsersForRequest(req);
+    return res.json({
+      ok: true,
+      users: users.map((user) => ({
+        uid: user.uid,
+        phone: user.phone,
+        driverDisplayName: user.driverDisplayName || "",
+      })),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Falha ao listar nomes dos usuarios",
+      details: String(error.message || error),
+    });
   }
 });
 

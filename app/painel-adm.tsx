@@ -11,11 +11,16 @@ import {
   View,
 } from "react-native";
 import { apiRequest } from "../lib/apiClient";
-import { getAuthIdToken } from "../lib/devStorage";
+import {
+  getAuthIdTokenOrRecover,
+  getCurrentAdminAccess,
+  withRecoveredAuthToken,
+} from "../lib/devStorage";
 
 type AdminUser = {
   uid: string;
   phone: string;
+  driverDisplayName?: string;
   role: "user" | "admin2" | "master";
   active: boolean;
   editMode: boolean;
@@ -41,6 +46,25 @@ type SignupRequest = {
   updatedAtIso: string;
 };
 
+type UserDisplayNameItem = {
+  uid: string;
+  phone: string;
+  driverDisplayName?: string;
+};
+
+function mergeUserDisplayNames(users: AdminUser[], names: UserDisplayNameItem[]) {
+  const namesByUid = new Map(
+    names.map((item) => [item.uid, String(item.driverDisplayName || "").trim().toUpperCase()])
+  );
+
+  return users.map((user) => {
+    const driverDisplayName = String(user.driverDisplayName || namesByUid.get(user.uid) || "")
+      .trim()
+      .toUpperCase();
+    return driverDisplayName ? { ...user, driverDisplayName } : user;
+  });
+}
+
 export default function PainelAdm() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,46 +84,98 @@ export default function PainelAdm() {
     [signupRequests]
   );
 
-  const carregarPainel = useCallback(async () => {
-    const idToken = await getAuthIdToken();
-    if (!idToken) {
-      setUsers([]);
-      setErrorMessage("Sessao administrativa indisponivel.");
-      setLoading(false);
-      return;
-    }
+  function getUserDisplayName(user: Pick<AdminUser, "driverDisplayName">) {
+    return String(user.driverDisplayName || "").trim().toUpperCase();
+  }
 
+  const carregarPainel = useCallback(async () => {
     setLoading(true);
     setErrorMessage("");
     try {
-      const access = await apiRequest<AdminAccessResponse>("/admin/access", {
-        idToken,
-        timeoutMs: 30000,
+      await withRecoveredAuthToken(async (idToken) => {
+        const access = await getCurrentAdminAccess();
+        console.log("[ADMIN_PANEL] adm2_access", { access });
+        if (access !== "master" && access !== "admin2") {
+          throw new Error("Painel indisponivel.");
+        }
+
+        const [configResult, usersResult, requestsResult] = await Promise.allSettled([
+          apiRequest<AdminConfigResponse>("/admin/config", {
+            idToken,
+            timeoutMs: 30000,
+          }),
+          apiRequest<{ ok: boolean; users: AdminUser[] }>("/admin/users", {
+            idToken,
+            timeoutMs: 30000,
+          }),
+          apiRequest<{ ok: boolean; requests: SignupRequest[] }>("/admin/signup-requests", {
+            idToken,
+            timeoutMs: 30000,
+          }),
+        ]);
+
+        if (configResult.status === "fulfilled") {
+          setRegistrationEnabled(configResult.value.registrationEnabled);
+        } else {
+          console.log("[ADMIN_PANEL] adm2_config_failed", {
+            error:
+              configResult.reason instanceof Error
+                ? configResult.reason.message
+                : String(configResult.reason),
+          });
+        }
+
+        if (usersResult.status === "fulfilled") {
+          let loadedUsers = Array.isArray(usersResult.value.users) ? usersResult.value.users : [];
+          console.log("[ADMIN_PANEL] adm2_users_loaded", {
+            count: loadedUsers.length,
+            names: loadedUsers.filter((user) => !!user.driverDisplayName).length,
+          });
+          try {
+            const namesResult = await apiRequest<{ ok: boolean; users: UserDisplayNameItem[] }>(
+              "/admin/user-display-names",
+              {
+                idToken,
+                timeoutMs: 30000,
+              }
+            );
+            loadedUsers = mergeUserDisplayNames(loadedUsers, namesResult.users || []);
+            console.log("[ADMIN_PANEL] adm2_display_names_loaded", {
+              names: loadedUsers.filter((user) => !!user.driverDisplayName).length,
+            });
+          } catch (nameError) {
+            console.log("[ADMIN_PANEL] adm2_display_names_failed", {
+              error: nameError instanceof Error ? nameError.message : String(nameError),
+            });
+          }
+          setUsers(loadedUsers);
+        } else {
+          console.log("[ADMIN_PANEL] adm2_users_failed", {
+            error:
+              usersResult.reason instanceof Error
+                ? usersResult.reason.message
+                : String(usersResult.reason),
+          });
+          throw usersResult.reason instanceof Error
+            ? usersResult.reason
+            : new Error("Falha ao carregar usuarios.");
+        }
+
+        if (requestsResult.status === "fulfilled") {
+          setSignupRequests(Array.isArray(requestsResult.value.requests) ? requestsResult.value.requests : []);
+        } else {
+          console.log("[ADMIN_PANEL] adm2_signup_requests_failed", {
+            error:
+              requestsResult.reason instanceof Error
+                ? requestsResult.reason.message
+                : String(requestsResult.reason),
+          });
+          setSignupRequests([]);
+        }
       });
-      if (access.access !== "master" && access.access !== "admin2") {
-        throw new Error("Painel indisponivel.");
-      }
-
-      const [config, data, requests] = await Promise.all([
-        apiRequest<AdminConfigResponse>("/admin/config", {
-          idToken,
-          timeoutMs: 30000,
-        }),
-        apiRequest<{ ok: boolean; users: AdminUser[] }>("/admin/users", {
-          idToken,
-          timeoutMs: 30000,
-        }),
-        apiRequest<{ ok: boolean; requests: SignupRequest[] }>("/admin/signup-requests", {
-          idToken,
-          timeoutMs: 30000,
-        }),
-      ]);
-
-      setRegistrationEnabled(config.registrationEnabled);
-      setUsers(data.users);
-      setSignupRequests(requests.requests);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha ao carregar painel.";
+      console.log("[ADMIN_PANEL] adm2_load_failed", { error: message });
       setUsers([]);
       setErrorMessage(message);
     } finally {
@@ -117,7 +193,7 @@ export default function PainelAdm() {
     uid: string,
     action: "approve" | "block" | "delete"
   ) {
-    const idToken = await getAuthIdToken();
+    const idToken = await getAuthIdTokenOrRecover();
     if (!idToken) return;
 
     setUpdatingSignupUid(uid);
@@ -148,7 +224,7 @@ export default function PainelAdm() {
   }
 
   async function atualizarUsuario(uid: string, patch: Partial<Pick<AdminUser, "active" | "editScope" | "editMode">>) {
-    const idToken = await getAuthIdToken();
+    const idToken = await getAuthIdTokenOrRecover();
     if (!idToken) return;
 
     const previous = users;
@@ -171,7 +247,7 @@ export default function PainelAdm() {
   }
 
   async function alternarCadastro() {
-    const idToken = await getAuthIdToken();
+    const idToken = await getAuthIdTokenOrRecover();
     if (!idToken) return;
 
     const next = !registrationEnabled;
@@ -209,8 +285,47 @@ export default function PainelAdm() {
     );
   }
 
+  function confirmarApagarRosto(uid: string, phone: string) {
+    Alert.alert(
+      "Apagar rosto",
+      `Apagar somente a foto facial de ${phone}? No proximo login esse usuario vai passar pela captura de rosto novamente.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Apagar rosto",
+          style: "destructive",
+          onPress: () => apagarRostoUsuario(uid),
+        },
+      ]
+    );
+  }
+
+  async function apagarRostoUsuario(uid: string) {
+    const idToken = await getAuthIdTokenOrRecover();
+    if (!idToken) return;
+
+    setUpdatingUid(uid);
+    try {
+      await apiRequest<{ ok: boolean; uid: string; cleared: boolean }>(
+        `/admin/users/${encodeURIComponent(uid)}/reset-face`,
+        {
+          method: "POST",
+          idToken,
+          timeoutMs: 30000,
+        }
+      );
+      Alert.alert("Rosto apagado", "A foto facial foi removida. No proximo login, o usuario vai capturar o rosto novamente.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha ao apagar rosto.";
+      setErrorMessage(message);
+      Alert.alert("Erro", message);
+    } finally {
+      setUpdatingUid(null);
+    }
+  }
+
   async function excluirTelasUsuario(uid: string) {
-    const idToken = await getAuthIdToken();
+    const idToken = await getAuthIdTokenOrRecover();
     if (!idToken) return;
 
     setUpdatingUid(uid);
@@ -335,6 +450,9 @@ export default function PainelAdm() {
             {!loading && errorMessage ? (
               <View style={styles.stateBox}>
                 <Text style={styles.errorText}>{errorMessage}</Text>
+                <Pressable onPress={carregarPainel} style={styles.retryButton}>
+                  <Text style={styles.retryButtonText}>Tentar novamente</Text>
+                </Pressable>
               </View>
             ) : null}
           </View>
@@ -342,10 +460,12 @@ export default function PainelAdm() {
         renderItem={({ item }) => {
           const busy = updatingUid === item.uid;
           const editing = item.editScope !== "none";
+          const displayName = getUserDisplayName(item);
           return (
             <View style={styles.userCard}>
               <View style={styles.cardTop}>
                 <View>
+                  {displayName ? <Text style={styles.driverName}>{displayName}</Text> : null}
                   <Text style={styles.phone}>{item.phone}</Text>
                   <Text style={styles.uid}>Login: {item.uid}</Text>
                 </View>
@@ -400,6 +520,14 @@ export default function PainelAdm() {
                   </Text>
                 </Pressable>
               </View>
+
+              <Pressable
+                onPress={() => confirmarApagarRosto(item.uid, item.phone)}
+                disabled={busy}
+                style={styles.warningAction}
+              >
+                <Text style={styles.warningActionText}>Apagar rosto</Text>
+              </Pressable>
 
               <Pressable
                 onPress={() => confirmarExcluirTelas(item.uid, item.phone)}
@@ -622,6 +750,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
   },
+  retryButton: {
+    marginTop: 12,
+    minHeight: 40,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#facc15",
+  },
+  retryButtonText: {
+    color: "#03131e",
+    fontSize: 13,
+    fontWeight: "900",
+  },
   userCard: {
     gap: 10,
     borderRadius: 24,
@@ -639,7 +781,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#ef4444",
   },
+  warningAction: {
+    minHeight: 46,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#9a3412",
+    borderWidth: 1,
+    borderColor: "#fb923c",
+  },
   dangerActionText: {
+    color: "#fafafa",
+    fontSize: 13,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  warningActionText: {
     color: "#fafafa",
     fontSize: 13,
     fontWeight: "900",
@@ -651,10 +808,17 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 12,
   },
-  phone: {
+  driverName: {
     color: "#fafafa",
-    fontSize: 19,
-    fontWeight: "800",
+    fontSize: 20,
+    fontWeight: "900",
+    letterSpacing: 0.2,
+  },
+  phone: {
+    color: "#8aa3bb",
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 2,
   },
   uid: {
     color: "#8aa3bb",
